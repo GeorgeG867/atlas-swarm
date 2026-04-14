@@ -166,6 +166,14 @@ class AIM:
             "task_type": str,
         }
         """
+        # PRODUCTION RULE: Gemma4 and Qwen3 30B use thinking mode by default,
+        # which breaks JSON extraction. Route structured-output tasks to Gemma3 27B
+        # (no thinking mode, clean JSON in content field, 13 tok/s, reliable).
+        # Gemma4 handles free-form reasoning/content. Qwen3 handles speed tasks.
+        needs_json = 'JSON' in prompt or 'json' in prompt or 'Return:' in prompt
+        if needs_json and preferred_model is None:
+            preferred_model = ModelTier.GEMMA3_27B
+
         model = preferred_model or self.select_model(
             task_type, require_local, require_multimodal, min_context
         )
@@ -189,7 +197,7 @@ class AIM:
             error = e
             log.warning(f"[AIM] {model.value} failed: {e}")
             # Fallback chain: try next local model
-            for fallback in [ModelTier.GEMMA3_27B, ModelTier.GEMMA4_26B, ModelTier.QWEN3_30B]:
+            for fallback in [ModelTier.GEMMA4_26B, ModelTier.GEMMA3_27B, ModelTier.QWEN3_30B]:
                 if fallback != model:
                     try:
                         text, tokens = await self._ollama_generate(
@@ -252,7 +260,11 @@ class AIM:
             )
             resp.raise_for_status()
             data = resp.json()
-            text = data["message"]["content"]
+            msg = data["message"]
+            text = msg.get("content", "")
+            # Gemma4 26B MoE uses reasoning mode — response may be in 'thinking' field
+            if not text and msg.get("thinking"):
+                text = msg["thinking"]
             tokens = data.get("eval_count", len(text) // 4)
             return text, tokens
 

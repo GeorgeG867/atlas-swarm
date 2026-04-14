@@ -1,255 +1,206 @@
-"""KIE — Knowledge Intelligence Engine.
+"""KIE Production — Knowledge Intelligence Engine.
 
-Bridges Server 1's 47M+ knowledge records into actionable product opportunities.
-Combines the existing knowledge_bridge (HTTP API) with AIM's intelligence layer
-to score, rank, and pipeline opportunities through the company swarm.
+WIRED to IdeaFrog's REAL API at Server 1 :5001.
+Not a reimplementation. Uses IdeaFrog's 8,066 lines of battle-tested code
+for opportunity scoring, campaign management, and recommendations.
 
-Pipeline: Knowledge DB → IdeaFrog Scout → RICE Scorer → CEO Approval → Product Pipeline
-
-Lean Six Sigma: KIE IS the Define + Measure step.
-- Define: What opportunities exist in our knowledge base?
-- Measure: Score them by RICE (Reach × Impact × Confidence / Effort)
+KIE's job: connect IdeaFrog (opportunity discovery) to MM1's swarm (execution).
 """
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .aim import AIM, ModelTier, get_aim
+import httpx
+
+from .aim import get_aim
 from .knowledge_bridge import KnowledgeBridge, get_bridge
 from .memory import read_memories, record_metric, write_memory
 
 log = logging.getLogger(__name__)
 
+IDEAFROG_URL = "http://192.168.1.204:5001"
+IDEAFROG_TIMEOUT = 60.0
+
 
 class KIE:
-    """Knowledge Intelligence Engine — turns 47M records into product opportunities."""
+    """Knowledge Intelligence Engine — bridges IdeaFrog to the MM1 swarm."""
 
     def __init__(self):
         self.bridge = get_bridge()
         self.aim = get_aim()
+        self._ideafrog: Optional[httpx.AsyncClient] = None
 
-    async def scan_opportunities(
-        self,
-        verticals: Optional[list[str]] = None,
-        limit_per_vertical: int = 20,
-    ) -> list[dict]:
-        """Scan knowledge base for product opportunities across verticals.
+    async def _get_ideafrog(self) -> httpx.AsyncClient:
+        if self._ideafrog is None or self._ideafrog.is_closed:
+            self._ideafrog = httpx.AsyncClient(
+                base_url=IDEAFROG_URL,
+                timeout=IDEAFROG_TIMEOUT,
+            )
+        return self._ideafrog
 
-        Default verticals target the highest-RICE categories from research:
-        1. Anatomical study models (surgical training)
-        2. Ergonomic grips (arthritis, OT market)
-        3. Parametric desk accessories
-        4. Replacement parts for obsolete goods
-        5. Custom medical splints (Class I exempt)
+    # ── IdeaFrog API wrappers ──────────────────────────────────────────
+
+    async def ideafrog_health(self) -> dict:
+        """Check IdeaFrog status."""
+        client = await self._get_ideafrog()
+        resp = await client.get("/health")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_opportunities(self, limit: int = 20) -> list[dict]:
+        """Fetch scored opportunities from IdeaFrog (the REAL source)."""
+        client = await self._get_ideafrog()
+        resp = await client.get("/opportunities", params={"limit": limit})
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("opportunities", [])
+
+    async def get_recommendations(self, limit: int = 10) -> list[dict]:
+        """Fetch IdeaFrog's pre-scored recommendations."""
+        client = await self._get_ideafrog()
+        resp = await client.get("/recommendations", params={"limit": limit})
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("recommendations", [])
+
+    async def run_pipeline(self) -> dict:
+        """Trigger IdeaFrog's full evaluation pipeline.
+
+        This runs IdeaFrog's BITF engine, expired patent agent, innovation
+        pipeline, and scoring on all pending opportunities.
         """
-        if verticals is None:
-            verticals = [
-                "anatomical model surgical training",
-                "ergonomic grip arthritis occupational therapy",
-                "desk organizer cable management parametric",
-                "replacement part obsolete consumer goods",
-                "orthotic splint rehabilitation",
-                "prosthetic socket custom fit",
-                "3D printed medical device",
-                "assistive technology elderly",
-            ]
+        client = await self._get_ideafrog()
+        resp = await client.post("/pipeline/run", timeout=300.0)
+        resp.raise_for_status()
+        result = resp.json()
+        record_metric("kie.pipeline_runs", 1.0, "kie")
+        write_memory("kie", "products", "Pipeline run triggered",
+                     json.dumps(result, indent=2, default=str)[:2000])
+        return result
 
-        all_opportunities = []
-        for vertical in verticals:
-            try:
-                results = await self.bridge.search(vertical, limit=limit_per_vertical)
-                for r in results:
-                    r["_vertical"] = vertical
-                    r["_source_query"] = vertical
-                all_opportunities.extend(results)
-            except Exception as e:
-                log.warning(f"[KIE] Search failed for '{vertical}': {e}")
+    async def evaluate_opportunity(self, opportunity_id: str) -> dict:
+        """Deep-evaluate a single opportunity via IdeaFrog."""
+        client = await self._get_ideafrog()
+        resp = await client.post("/pipeline/evaluate-single",
+                                 json={"opportunity_id": opportunity_id})
+        resp.raise_for_status()
+        return resp.json()
 
-        log.info(f"[KIE] Scanned {len(verticals)} verticals, found {len(all_opportunities)} raw opportunities")
-        return all_opportunities
+    async def get_campaigns(self, limit: int = 10) -> list[dict]:
+        """Fetch IdeaFrog campaigns."""
+        client = await self._get_ideafrog()
+        resp = await client.get("/campaigns", params={"limit": limit})
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else data.get("campaigns", [])
 
-    async def score_with_aim(self, opportunities: list[dict], top_n: int = 10) -> list[dict]:
-        """Use AIM to intelligently score and rank opportunities.
+    async def generate_predictions(self, data: dict) -> dict:
+        """Generate revenue/market predictions via IdeaFrog's ML model."""
+        client = await self._get_ideafrog()
+        resp = await client.post("/predictions/predict", json=data)
+        resp.raise_for_status()
+        return resp.json()
 
-        For each opportunity, AIM evaluates:
-        - Market viability (is there demand?)
-        - Manufacturing feasibility (can we 3D print it?)
-        - Regulatory risk (FDA implications?)
-        - Competitive landscape (who else is selling this?)
-        - Revenue potential (price × volume estimate)
+    # ── Combined intelligence (IdeaFrog + AIM + Knowledge Bridge) ──────
+
+    async def select_top_products(self, count: int = 5) -> list[dict]:
+        """Select top N products for the swarm to commercialize.
+
+        Combines:
+        1. IdeaFrog's 119 pre-scored opportunities
+        2. AIM's additional scoring (market viability, 3D printability)
+        3. Knowledge bridge context (enriched patent data)
+
+        Returns production-ready product candidates.
         """
-        if not opportunities:
-            return []
+        # Get IdeaFrog's recommendations
+        recs = await self.get_recommendations(limit=count * 3)
 
-        # Batch opportunities into groups of 5 for efficiency
-        scored = []
-        for i in range(0, len(opportunities), 5):
-            batch = opportunities[i:i+5]
-            batch_text = json.dumps([
-                {
-                    "title": r.get("title", "")[:200],
-                    "abstract": (r.get("text") or r.get("abstract") or "")[:300],
-                    "source": r.get("source", ""),
-                    "vertical": r.get("_vertical", ""),
-                    "score": r.get("fused_score") or r.get("score", 0),
-                }
-                for r in batch
-            ], indent=2)
+        if not recs:
+            log.warning("[KIE] No recommendations from IdeaFrog — using opportunities")
+            recs = await self.get_opportunities(limit=count * 3)
 
-            prompt = f"""Score these {len(batch)} product opportunities using RICE framework.
+        # AIM enhancement: score for commercialization readiness
+        enhanced = []
+        for rec in recs[:count * 2]:
+            title = rec.get("title", "")[:100]
+            description = rec.get("description", "")[:500]
+            domain = rec.get("domain", "general")
+            raw_score = rec.get("final_score") or rec.get("raw_score", 0)
 
-OPPORTUNITIES:
-{batch_text}
-
-For EACH opportunity, provide:
-1. reach (1-10): How many potential customers?
-2. impact (1-10): How much value per customer?
-3. confidence (1-10): How sure are we this works?
-4. effort (1-10): How hard to build and ship? (1=easy, 10=hard)
-5. rice_score: (reach × impact × confidence) / effort
-6. verdict: BUILD, EXPLORE, or SKIP
-7. rationale: One sentence why
-
-SCORING GUIDE:
-- Expired patents with clear physical product = high confidence
-- Medical devices requiring FDA = high effort
-- Consumer goods < $50 = high reach
-- B2B specialty > $100 = high impact
-
-Return JSON array: [{{"title": "...", "reach": N, "impact": N, "confidence": N, "effort": N, "rice_score": N, "verdict": "BUILD|EXPLORE|SKIP", "rationale": "..."}}]
-"""
+            # Quick AIM assessment
             try:
-                result = await self.aim.generate(
-                    prompt=prompt,
-                    system="You are a product strategist scoring opportunities for a 3D printing company targeting $10M annual revenue at 40% margin.",
+                aim_result = await self.aim.generate(
+                    prompt=f"""Rate this product opportunity for immediate commercialization (1-10):
+
+Title: {title}
+Domain: {domain}
+Score: {raw_score}
+Description: {description}
+
+Rate on:
+- printability (can we 3D print a version?): 1-10
+- market_demand (do people buy this?): 1-10
+- speed_to_market (days to first sale): number
+- regulatory_risk (0=none, 10=FDA required): 1-10
+
+Return ONLY JSON: {{"printability": N, "market_demand": N, "speed_to_market": N, "regulatory_risk": N, "go_no_go": "GO|NO_GO", "one_liner": "..."}}""",
                     task_type="patent_analysis",
-                    max_tokens=2000,
+                    max_tokens=200,
                     require_local=True,
                 )
-                # Parse response
-                text = result["text"]
-                # Try to extract JSON from response
                 import re
-                json_match = re.search(r'\[.*\]', text, re.DOTALL)
-                if json_match:
-                    scores = json.loads(json_match.group())
-                    for j, score in enumerate(scores):
-                        if i + j < len(opportunities):
-                            opportunities[i + j]["_aim_score"] = score
-                            opportunities[i + j]["_rice_total"] = score.get("rice_score", 0)
-                            opportunities[i + j]["_verdict"] = score.get("verdict", "SKIP")
-                            scored.append(opportunities[i + j])
+                match = re.search(r'\{.*\}', aim_result["text"], re.DOTALL)
+                if match:
+                    aim_score = json.loads(match.group())
+                    rec["_aim_assessment"] = aim_score
+                    rec["_commercialization_score"] = (
+                        aim_score.get("printability", 5) *
+                        aim_score.get("market_demand", 5) /
+                        max(aim_score.get("regulatory_risk", 5), 1)
+                    )
+                else:
+                    rec["_commercialization_score"] = raw_score
             except Exception as e:
-                log.warning(f"[KIE] AIM scoring failed for batch {i//5}: {e}")
-                # Still include unscorable items
-                for r in batch:
-                    r["_aim_score"] = {"error": str(e)}
-                    r["_rice_total"] = 0
-                    r["_verdict"] = "EXPLORE"
-                    scored.append(r)
+                log.warning(f"[KIE] AIM scoring failed for '{title}': {e}")
+                rec["_commercialization_score"] = raw_score
 
-        # Sort by RICE score
-        scored.sort(key=lambda x: x.get("_rice_total", 0), reverse=True)
+            enhanced.append(rec)
 
-        # Log top picks to memory
-        top_picks = scored[:top_n]
-        write_memory(
-            agent_id="kie",
-            category="products",
-            title=f"Opportunity scan: {len(scored)} scored, top {len(top_picks)} selected",
-            content=json.dumps([
-                {
-                    "title": r.get("title", "")[:100],
-                    "rice": r.get("_rice_total", 0),
-                    "verdict": r.get("_verdict", "?"),
-                    "vertical": r.get("_vertical", ""),
-                }
-                for r in top_picks
-            ], indent=2),
-            confidence=0.7,
-        )
+        # Sort by commercialization score
+        enhanced.sort(key=lambda x: x.get("_commercialization_score", 0), reverse=True)
+        top = enhanced[:count]
 
-        record_metric("kie.opportunities_scored", float(len(scored)), "kie")
-        record_metric("kie.top_rice_score", float(top_picks[0].get("_rice_total", 0)) if top_picks else 0.0, "kie")
+        # Log selection
+        write_memory("kie", "products",
+                     f"TOP {count} PRODUCTS SELECTED for commercialization",
+                     json.dumps([{
+                         "title": r.get("title", "")[:80],
+                         "score": r.get("_commercialization_score", 0),
+                         "domain": r.get("domain", ""),
+                         "go": r.get("_aim_assessment", {}).get("go_no_go", "?"),
+                     } for r in top], indent=2),
+                     confidence=0.75)
 
-        return top_picks
+        record_metric("kie.products_selected", float(len(top)), "kie")
+        return top
 
-    async def generate_product_brief(self, opportunity: dict) -> dict:
-        """Generate a complete product brief from an opportunity.
-
-        This is the handoff document from KIE → CTO-Agent for design.
-        """
-        title = opportunity.get("title", "Unknown")
-        abstract = opportunity.get("text") or opportunity.get("abstract") or ""
-        aim_score = opportunity.get("_aim_score", {})
-
-        prompt = f"""Generate a complete product brief for manufacturing.
-
-SOURCE PATENT/PAPER:
-Title: {title}
-Abstract: {abstract[:1000]}
-RICE Score: {json.dumps(aim_score, indent=2)}
-
-PRODUCE:
-1. product_name: Catchy, marketplace-ready name
-2. description: 2-3 sentence product description for listing
-3. target_customer: Who buys this?
-4. price_range: Recommended retail price range
-5. bill_of_materials: What to 3D print (material, infill, layer height)
-6. estimated_cost: COGS estimate (material + print time + post-processing)
-7. margin_estimate: Expected gross margin %
-8. marketplace: Where to sell (Etsy, Amazon, both?)
-9. regulatory_notes: Any FDA/compliance considerations
-10. design_prompt: Instructions for CAD generation (OpenSCAD or parametric)
-11. photo_requirements: What product photos are needed
-12. video_concept: 15-second video script idea
-
-Return as JSON object.
-"""
-        result = await self.aim.generate(
-            prompt=prompt,
-            system="You are a product development lead at a 3D printing startup. Be specific about materials, dimensions, and costs.",
-            task_type="product_design",
-            max_tokens=2000,
-            require_local=True,
-        )
-
-        brief = {"raw_response": result["text"], "source_opportunity": title}
+    async def stats(self) -> dict:
+        """Full KIE status combining all sources."""
+        bridge_stats = await self.bridge.stats()
         try:
-            import re
-            json_match = re.search(r'\{.*\}', result["text"], re.DOTALL)
-            if json_match:
-                brief = {**json.loads(json_match.group()), "source_opportunity": title}
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-        write_memory(
-            agent_id="kie",
-            category="products",
-            title=f"Brief: {brief.get('product_name', title)[:60]}",
-            content=json.dumps(brief, indent=2, default=str),
-            confidence=0.6,
-        )
-        return brief
-
-    async def weekly_pipeline_report(self) -> dict:
-        """Generate weekly KIE pipeline report for CEO-Agent."""
-        stats = await self.bridge.stats()
-        recent_scans = read_memories(agent_id="kie", category="products", limit=20)
+            if_health = await self.ideafrog_health()
+        except Exception:
+            if_health = {"status": "unreachable"}
 
         return {
-            "knowledge_base_size": stats.get("knowledge", 0),
-            "recent_opportunities_scored": len(recent_scans),
-            "pipeline_summary": [
-                {"title": m["title"][:80], "confidence": m["confidence"]}
-                for m in recent_scans[:10]
-            ],
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "knowledge_base": bridge_stats.get("knowledge", 0),
+            "ideafrog": if_health,
+            "recent_selections": len(read_memories(agent_id="kie", category="products", limit=10)),
         }
 
 
-# Singleton
 _kie: Optional[KIE] = None
 
 
