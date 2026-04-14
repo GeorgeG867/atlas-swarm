@@ -2,9 +2,12 @@
 
 Each follows the same SwarmAgent pattern: DMAIC, self-improvement,
 persistent memory, local+cloud LLM inference.
+
+CTO v2: Real CAD generation via CadQuery — no more text-only designs.
 """
 import json
 import logging
+import os
 from typing import Any
 
 from .agent_base import SwarmAgent
@@ -46,7 +49,6 @@ class CMOAgent(SwarmAgent):
             return await self._general_marketing(task)
 
     async def _listing_content(self, task: dict) -> dict:
-        """Generate marketplace listing content for a product."""
         product = task.get("product", {})
         prompt = f"""Create a complete marketplace listing for this product:
 
@@ -75,7 +77,6 @@ Return JSON with keys: title, bullets, description, tags, price_recommendation
             return {"success": True, "result": {"raw": response}}
 
     async def _social_post(self, task: dict) -> dict:
-        """Generate social media posts for a product."""
         product = task.get("product", {})
         platforms = task.get("platforms", ["twitter", "linkedin", "tiktok"])
         prompt = f"""Create social media posts for this product across {platforms}:
@@ -94,7 +95,6 @@ Return JSON with platform names as keys.
         return {"success": True, "result": response}
 
     async def _seo_optimize(self, task: dict) -> dict:
-        """SEO-optimize existing content."""
         content = task.get("content", "")
         keywords = task.get("target_keywords", [])
         prompt = f"""Optimize this content for SEO targeting keywords: {keywords}
@@ -152,7 +152,6 @@ class CROAgent(SwarmAgent):
             return {"success": True, "result": response}
 
     async def _publish_listing(self, task: dict) -> dict:
-        """Prepare and validate a listing for marketplace submission."""
         listing = task.get("listing", {})
         marketplace = task.get("marketplace", "etsy")
 
@@ -183,7 +182,6 @@ Return JSON: {{
             return {"success": True, "result": {"raw": response}}
 
     async def _optimize_pricing(self, task: dict) -> dict:
-        """Analyze and recommend pricing adjustments."""
         products = task.get("products", [])
         prompt = f"""Optimize pricing for these products:
 
@@ -202,7 +200,6 @@ Return JSON array with product_id, current_price, recommended_price, rationale.
         return {"success": True, "result": response}
 
     async def _revenue_report(self, task: dict) -> dict:
-        """Generate weekly revenue report."""
         prompt = """Generate a revenue status report based on available metrics.
 Include: total revenue, units sold, conversion rate, top products, margin analysis.
 Flag any products below 35% margin for CEO review."""
@@ -212,93 +209,210 @@ Flag any products below 35% margin for CEO review."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CTO — Chief Technology Officer
+# CTO — Chief Technology Officer  (v2 — real CAD generation)
 # ═══════════════════════════════════════════════════════════════════════════
 
 class CTOAgent(SwarmAgent):
-    """Owns product design (STL generation), QA, and infrastructure."""
+    """Owns product design (CAD -> STL), QA, and infrastructure.
+
+    v2: every design_product call produces a real CadQuery STL/STEP,
+    validated for printability.  Text-only designs are gone.
+    """
 
     def __init__(self):
         super().__init__(
             agent_id="cto",
             role="Chief Technology Officer",
-            goal="Ship products from idea to listing in <7 days; defect rate <5%",
+            goal="Ship printable STL from idea in <1 hour; geometry defect rate <5%",
             backstory=(
-                "You own the product design pipeline: from concept to STL to printable object. "
-                "You manage QA (print quality, dimensional accuracy) and infrastructure "
-                "(servers, model deployments, CI/CD). You command design, QA, and infra sub-agents. "
-                "You track time-to-first-unit and defect rate."
+                "You own the product design pipeline: concept -> parametric CAD -> "
+                "validated STL -> print spec.  You use CadQuery for real geometry — "
+                "never text-only descriptions.  Every model is validated for wall "
+                "thickness, print volume, and manifold integrity before handoff."
             ),
         )
 
     async def execute(self, task: dict) -> dict:
         task_type = task.get("type", "design")
-
-        if task_type == "design_product":
-            return await self._design_product(task)
-        elif task_type == "qa_review":
-            return await self._qa_review(task)
-        elif task_type == "infra_status":
-            return await self._infra_status(task)
-        else:
-            prompt = f"Tech task: {json.dumps(task, indent=2)}\n\nProvide implementation plan."
-            response = await self.llm(prompt)
-            return {"success": True, "result": response}
+        dispatch = {
+            "design_product": self._design_product,
+            "generate_cad": self._generate_cad,
+            "qa_review": self._qa_review,
+            "infra_status": self._infra_status,
+        }
+        handler = dispatch.get(task_type, self._general)
+        return await handler(task)
 
     async def _design_product(self, task: dict) -> dict:
-        """Generate product design spec from an opportunity."""
+        """Opportunity -> library match -> param tuning via AIM -> CAD -> validate -> export."""
+        from . import cad_engine, cad_library
+
         opportunity = task.get("opportunity", {})
-        prompt = f"""Design a physical product based on this opportunity:
+        combined = " ".join([
+            opportunity.get("title", ""),
+            opportunity.get("description", ""),
+            opportunity.get("domain", ""),
+            opportunity.get("vertical", ""),
+        ]).lower()
+
+        product_type = cad_engine.match_product_type(combined)
+
+        if product_type:
+            result = await self._design_from_library(product_type, opportunity)
+        else:
+            result = await self._design_from_llm_code(opportunity)
+
+        if not result.get("success"):
+            return result
+
+        validation = result.get("validation", {})
+        metrics = validation.get("metrics", {})
+        dims = metrics.get("dimensions_mm", {})
+
+        report = {
+            "product_name": result.get("product_name", result.get("product_type", "custom")),
+            "product_type": result.get("product_type", "custom"),
+            "stl_file": result.get("stl_filename"),
+            "step_file": result.get("step_filename"),
+            "stl_path": result.get("stl_path"),
+            "dimensions_mm": dims,
+            "volume_cm3": metrics.get("volume_cm3", 0),
+            "estimated_weight_g": metrics.get("estimated_weight_pla_g", 0),
+            "printability": {
+                "valid": validation.get("valid", False),
+                "issues": validation.get("issues", []),
+                "fits_print_bed": metrics.get("fits_print_bed", False),
+            },
+            "print_info": result.get("print_info", {}),
+            "generation_time_s": result.get("generation_time_s", 0),
+        }
+
+        write_memory(self.agent_id, "products",
+                      f"CAD: {report['product_name'][:50]}",
+                      json.dumps(report, indent=2))
+        record_metric("cto.stl_generated", 1.0, self.agent_id)
+        record_metric("cto.products_designed", 1.0, self.agent_id)
+
+        return {"success": True, "result": report}
+
+    async def _design_from_library(self, product_type: str, opportunity: dict) -> dict:
+        from . import cad_engine, cad_library
+
+        catalog = cad_library.PRODUCTS[product_type]
+        defaults = cad_library.get_function_params(product_type)
+
+        prompt = f"""You are designing a **{catalog['name']}** for 3D-print manufacturing.
 
 OPPORTUNITY: {json.dumps(opportunity, indent=2)}
 
-Produce:
-1. Product name and description
-2. Bill of materials (what to print, what to buy)
-3. Dimensions (mm) and weight estimate
-4. Print settings: material (PLA/PETG/TPU/resin), infill %, layer height
-5. Post-processing steps
-6. Estimated print time and material cost
-7. OpenSCAD or parametric description for STL generation
-8. Known risks or failure modes
+Available parameters and their DEFAULTS:
+{json.dumps(defaults, indent=2)}
 
-Return structured JSON.
+Consider:
+- Who buys this on Amazon/Etsy?  What dimensions do top sellers use?
+- 3D-print constraints: max 256x256x256mm, min 1.2mm walls, FDM process.
+- Material: {catalog['default_material']}
+
+Return ONLY a JSON object with parameters you want to CHANGE.
+Return {{}} (empty) to accept all defaults.
+Do NOT include explanation — just the JSON object.
 """
-        response = await self.llm(prompt)
-        write_memory(self.agent_id, "products", f"Design: {opportunity.get('title', 'unnamed')[:60]}", response)
-        record_metric("cto.products_designed", 1.0, self.agent_id)
+        text = await self.llm(prompt, task_type="product_design", max_tokens=400)
+        params = {}
         try:
-            return {"success": True, "result": json.loads(response)}
-        except json.JSONDecodeError:
-            return {"success": True, "result": {"raw": response}}
+            import re
+            m = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+            if m:
+                params = json.loads(m.group())
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        return cad_engine.generate_from_library(product_type, params)
+
+    async def _design_from_llm_code(self, opportunity: dict) -> dict:
+        from . import cad_engine
+
+        prompt = f"""Write CadQuery Python code to model this product for 3D printing:
+
+PRODUCT: {json.dumps(opportunity, indent=2)}
+
+RULES (follow exactly):
+1. `import cadquery as cq` and `import math` only.
+2. Assign the final solid to `result`.
+3. All dimensions in mm.  Min wall: 1.5mm.  Max: 256x256x256mm.
+4. Use ONLY: .box(), .cylinder(), .circle(), .rect(), .extrude(), .cut(),
+   .union(), .fillet(), .chamfer(), .translate(), .rotate(), .workplane(), .center()
+5. 30-60 lines.  No lofts, sweeps, or splines — they break the kernel.
+6. Add dimension comments.
+
+Return ONLY Python code.  No markdown.  No explanation.
+"""
+        code = await self.llm(prompt, task_type="product_design", max_tokens=2000)
+        code = code.strip()
+        if code.startswith("```"):
+            lines = code.split("\n")
+            code = "\n".join(lines[1:(-1 if lines[-1].strip() == "```" else len(lines))])
+
+        name = opportunity.get("title", "custom")[:40]
+        return cad_engine.generate_from_code(code, name)
+
+    async def _generate_cad(self, task: dict) -> dict:
+        from . import cad_engine
+        return cad_engine.generate_from_library(
+            task.get("product_type", "phone_stand"),
+            task.get("params", {}),
+        )
 
     async def _qa_review(self, task: dict) -> dict:
-        """QA review of a printed product."""
+        from . import cad_engine
+
         product = task.get("product", {})
-        prompt = f"""QA review for this product:
+        checks = []
+
+        stl_path = product.get("stl_path") or product.get("stl_file")
+        if stl_path:
+            try:
+                from pathlib import Path
+                import cadquery as cq
+                p = Path(stl_path)
+                if p.exists() and p.suffix == ".step":
+                    solid = cq.importers.importStep(str(p))
+                    checks.append({"check": "geometry", "result": cad_engine.validate_geometry(solid)})
+            except Exception as exc:
+                checks.append({"check": "geometry", "result": {"error": str(exc)}})
+
+        prompt = f"""QA review for this 3D-printed product:
 
 {json.dumps(product, indent=2)}
 
-Check:
-1. Dimensional accuracy (within 0.5mm tolerance)
-2. Surface finish quality
-3. Structural integrity
-4. Safety (no sharp edges, non-toxic material)
-5. Packaging adequacy
+Evaluate (1-5 each):
+1. Print success likelihood (overhangs, bridges, supports?)
+2. Dimensional accuracy for FDM (+/-0.3mm typical)
+3. Structural integrity under normal use
+4. Surface finish (layer lines acceptable?)
+5. Safety (sharp edges? material safety?)
 
-Return: PASS, CONDITIONAL PASS, or FAIL with specific issues.
+Return: PASS / CONDITIONAL PASS / FAIL with scores and specific issues.
 """
-        response = await self.llm(prompt)
+        response = await self.llm(prompt, task_type="quality_audit", max_tokens=800)
+        checks.append({"check": "design_review", "result": response})
         record_metric("cto.qa_reviews", 1.0, self.agent_id)
-        return {"success": True, "result": response}
+        return {"success": True, "result": {"qa_checks": checks}}
 
     async def _infra_status(self, task: dict) -> dict:
-        """Report infrastructure status."""
-        prompt = """Report on the current infrastructure status:
-- MM1 (Mac Mini): Ollama, agent swarm, memory vault
-- Server 1: enrichment pipeline, knowledge DB
-- Server 2: DB replica, backup
-Flag any service outages or performance issues."""
+        from . import cad_engine
+        return {
+            "success": True,
+            "result": {
+                "cad_engine": "CadQuery 2.7.0",
+                "available_products": cad_engine.list_available_products(),
+                "renders_on_disk": len(cad_engine.list_renders()),
+                "recent_renders": cad_engine.list_renders()[:5],
+            },
+        }
+
+    async def _general(self, task: dict) -> dict:
+        prompt = f"Tech task: {json.dumps(task, indent=2)}\n\nProvide implementation plan."
         response = await self.llm(prompt)
         return {"success": True, "result": response}
 
@@ -338,7 +452,6 @@ class CFOAgent(SwarmAgent):
             return {"success": True, "result": response}
 
     async def _approve_spend(self, task: dict) -> dict:
-        """Approve or reject a spending request."""
         amount = task.get("amount", 0)
         purpose = task.get("purpose", "unspecified")
         requester = task.get("requester", "unknown")
@@ -376,7 +489,6 @@ Return JSON: {{"approved": true/false, "rationale": "...", "conditions": ["..."]
             return {"success": True, "result": {"raw": response}}
 
     async def _weekly_pnl(self, task: dict) -> dict:
-        """Generate weekly P&L report."""
         recent_metrics = read_memories(category="metrics", limit=50)
         prompt = f"""Generate a weekly P&L report.
 
@@ -399,7 +511,6 @@ If data is incomplete, state what's missing and provide a template.
         return {"success": True, "result": response}
 
     async def _unit_economics(self, task: dict) -> dict:
-        """Analyze unit economics for a product."""
         product = task.get("product", {})
         prompt = f"""Calculate unit economics for this product:
 

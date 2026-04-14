@@ -1,12 +1,13 @@
-"""Atlas Swarm Orchestrator v2 — Full company with AIM + KIE.
+"""Atlas Swarm Orchestrator v2.1 — Full company with AIM + KIE + CAD Engine.
 
 Coordinates 9 agents via AIM (multi-model router) + Q-learning:
-  Executive: CEO, CMO, CRO, CTO, CFO
+  Executive: CEO, CMO, CRO, CTO (v2 — real CAD), CFO
   Operations: Manufacturing, Content Production, Marketplace, R&D
 
 Powered by:
   - AIM v1 (Atlas Intelligence Model — multi-model router with ML)
-  - KIE (Knowledge Intelligence Engine — 47M+ record pipeline)
+  - KIE (Knowledge Intelligence Engine — 49M+ record pipeline)
+  - CAD Engine (CadQuery parametric library + LLM code generation)
   - Q-learning self-evolving router
   - Persistent Obsidian + SQLite memory
   - Lean Six Sigma DMAIC cycles
@@ -87,6 +88,7 @@ class SwarmOrchestrator:
             "generate_listing_content": "cmo", "social_post": "cmo", "seo_optimize": "cmo",
             "publish_listing": "cro", "optimize_pricing": "cro", "revenue_report": "cro",
             "design_product": "cto", "qa_review": "cto", "infra_status": "cto",
+            "generate_cad": "cto",
             "approve_spend": "cfo", "weekly_pnl": "cfo", "unit_economics": "cfo",
             "generate_print_spec": "manufacturing", "quality_check": "manufacturing",
             "full_content": "content", "listing_copy": "content",
@@ -106,7 +108,7 @@ class SwarmOrchestrator:
         return {"agent": agent_id, "task_type": task_type, "success": success, "result": result.get("result")}
 
     async def run_full_pipeline(self, vertical: str = "anatomical model surgical training") -> dict:
-        """End-to-end: scan -> score -> brief -> spec -> content -> listing."""
+        """End-to-end: scan -> score -> brief -> CAD -> spec -> content -> listing."""
         log.info(f"[PIPELINE] Starting for: {vertical}")
         steps = {}
         scan = await self.dispatch({"type": "innovation_scan", "verticals": [vertical]})
@@ -115,18 +117,49 @@ class SwarmOrchestrator:
         if not top_10:
             return {"success": False, "error": "No opportunities", "steps": steps}
         top = top_10[0]
-        steps["2_ceo"] = (await self.dispatch({"type": "review_opportunities", "opportunities": top_10[:5]}))
-        brief = await self.kie.generate_product_brief({"title": top.get("title", ""), "text": "", "_vertical": vertical})
-        steps["3_brief"] = {"product": brief.get("product_name", "?")}
+        steps["2_ceo"] = await self.dispatch({"type": "review_opportunities", "opportunities": top_10[:5]})
+
+        # Step 3: CTO designs the product — now generates real STL
+        design = await self.dispatch({
+            "type": "design_product",
+            "opportunity": {"title": top.get("title", ""), "domain": top.get("domain", ""), "vertical": vertical},
+        })
+        steps["3_design"] = design
+
+        # Extract brief — now includes real STL path
+        brief = design.get("result", {}) if isinstance(design.get("result"), dict) else {
+            "product_name": top.get("title", vertical)[:50],
+            "raw": str(design.get("result", ""))[:1000],
+        }
+
+        # Step 4: Manufacturing print spec (now receives STL path from CTO)
         steps["4_spec"] = await self.dispatch({"type": "generate_print_spec", "product_brief": brief})
+
+        # Step 5: Content production
         steps["5_content"] = await self.dispatch({"type": "full_content", "product_brief": brief})
-        steps["6_listing"] = await self.dispatch({"type": "prepare_listing", "content_package": steps["5_content"].get("result", {}), "marketplace": "etsy"})
+
+        # Step 6: Marketplace listing prep
+        content_result = steps["5_content"].get("result", {})
+        if isinstance(content_result, str):
+            content_result = {"raw": content_result, "_product_name": brief.get("product_name", "unnamed")}
+        steps["6_listing"] = await self.dispatch({
+            "type": "prepare_listing",
+            "content_package": content_result,
+            "marketplace": "etsy",
+        })
+
+        # Step 7: CFO unit economics
         steps["7_econ"] = await self.dispatch({"type": "unit_economics", "product": brief})
-        ok = all(s.get("success", False) if isinstance(s, dict) and "success" in s else True for s in steps.values())
-        write_memory("orchestrator", "products", f"Pipeline: {brief.get('product_name', vertical)[:50]}",
+
+        ok = all(
+            s.get("success", False) if isinstance(s, dict) and "success" in s else True
+            for s in steps.values()
+        )
+        product_name = brief.get("product_name", top.get("title", vertical)[:50])
+        write_memory("orchestrator", "products", f"Pipeline: {product_name}",
                      json.dumps(steps, indent=2, default=str)[:3000], confidence=0.7)
         record_metric("orchestrator.pipeline_runs", 1.0, "orchestrator")
-        return {"success": ok, "product": brief.get("product_name"), "steps": steps}
+        return {"success": ok, "product": product_name, "steps": steps}
 
     async def weekly_cycle(self) -> dict:
         log.info("[WEEKLY] DMAIC cycle")
@@ -153,9 +186,10 @@ class SwarmOrchestrator:
 
 def create_app():
     from fastapi import FastAPI
+    from fastapi.responses import FileResponse
     from pydantic import BaseModel
 
-    app = FastAPI(title="Atlas Swarm — AI Factory Company", version="2.0.0")
+    app = FastAPI(title="Atlas Swarm — AI Factory Company", version="2.1.0")
     orch = SwarmOrchestrator()
 
     class TaskRequest(BaseModel):
@@ -165,7 +199,7 @@ def create_app():
 
     @app.get("/health")
     async def health():
-        return {"status": "healthy", "agents": len(orch.agents), "aim": "v1"}
+        return {"status": "healthy", "agents": len(orch.agents), "aim": "v1", "cad": "CadQuery 2.7"}
 
     @app.get("/status")
     async def status():
@@ -223,6 +257,81 @@ def create_app():
     @app.get("/memories")
     async def mem(agent_id: Optional[str] = None, category: Optional[str] = None, limit: int = 20):
         return read_memories(agent_id=agent_id, category=category, limit=limit)
+
+    # ── Visualization endpoints ──────────────────────────────────────
+
+    @app.post("/visualize")
+    async def visualize_product(product_name: str, description: str = "", material: str = "white PETG plastic"):
+        from .visualizer import generate_product_render
+        brief = {"product_name": product_name, "product_description": description, "material": material}
+        return await generate_product_render(brief)
+
+    @app.get("/renders")
+    async def list_renders():
+        renders_dir = Path.home() / "Projects/atlas-swarm/renders"
+        if not renders_dir.exists():
+            return []
+        files = sorted(renders_dir.glob("*.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [
+            {"name": f.name, "size_kb": round(f.stat().st_size / 1024, 1), "type": f.suffix.lstrip(".")}
+            for f in files[:30]
+            if f.suffix in (".png", ".stl", ".step", ".html")
+        ]
+
+    @app.get("/renders/{filename}")
+    async def get_render(filename: str):
+        filepath = Path.home() / "Projects/atlas-swarm/renders" / filename
+        if not filepath.exists():
+            return {"error": "Not found"}
+        media_types = {
+            ".png": "image/png", ".stl": "application/octet-stream",
+            ".step": "application/octet-stream", ".html": "text/html",
+        }
+        mt = media_types.get(filepath.suffix, "application/octet-stream")
+        return FileResponse(filepath, media_type=mt)
+
+    @app.get("/3d-viewer")
+    async def viewer_3d():
+        viewer = Path.home() / "Projects/atlas-swarm/renders/viewer.html"
+        if not viewer.exists():
+            return {"error": "Viewer not found — run /design first to generate it"}
+        return FileResponse(viewer, media_type="text/html")
+
+    # ── CAD Engine endpoints (v2.1) ──────────────────────────────────
+
+    @app.post("/design")
+    async def design_product(product_type: str = "phone_stand", params: str = "{}"):
+        """Generate a product STL from the parametric library.
+
+        params is a JSON string of parameter overrides.
+        Example: /design?product_type=phone_stand&params={"width":90}
+        """
+        from . import cad_engine
+        try:
+            parsed = json.loads(params)
+        except json.JSONDecodeError:
+            return {"success": False, "error": "Invalid JSON in params"}
+        return cad_engine.generate_from_library(product_type, parsed)
+
+    @app.get("/products")
+    async def list_products():
+        """List available parametric product types and their tunable parameters."""
+        from . import cad_engine
+        return cad_engine.list_available_products()
+
+    @app.post("/cad/generate")
+    async def cad_generate(product_type: str = "phone_stand"):
+        """Generate CAD via CTO agent (includes AIM parameter tuning)."""
+        return await orch.dispatch({
+            "type": "generate_cad",
+            "product_type": product_type,
+        })
+
+    @app.get("/cad/renders")
+    async def cad_renders():
+        """List all generated STL/STEP files on disk."""
+        from . import cad_engine
+        return cad_engine.list_renders()
 
     return app
 
