@@ -250,6 +250,35 @@ def create_app():
     async def mem(agent_id: Optional[str] = None, category: Optional[str] = None, limit: int = 20):
         return read_memories(agent_id=agent_id, category=category, limit=limit)
 
+    # ── Visualization endpoints ──────────────────────────────────────
+
+    @app.post("/visualize")
+    async def visualize_product(product_name: str, description: str = "", material: str = "white PETG plastic"):
+        """Generate a photorealistic product render before committing to manufacturing."""
+        from .visualizer import generate_product_render
+        brief = {"product_name": product_name, "product_description": description, "material": material}
+        return await generate_product_render(brief)
+
+    @app.get("/renders")
+    async def list_renders():
+        """List all generated product renders."""
+        from pathlib import Path
+        renders_dir = Path.home() / "Projects/atlas-swarm/renders"
+        if not renders_dir.exists():
+            return []
+        files = sorted(renders_dir.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [{"name": f.name, "size_kb": round(f.stat().st_size / 1024, 1), "path": str(f)} for f in files[:20]]
+
+    @app.get("/renders/{filename}")
+    async def get_render(filename: str):
+        """Serve a specific product render image."""
+        from fastapi.responses import FileResponse
+        from pathlib import Path
+        filepath = Path.home() / "Projects/atlas-swarm/renders" / filename
+        if not filepath.exists() or not filepath.suffix == ".png":
+            return {"error": "Not found"}
+        return FileResponse(filepath, media_type="image/png")
+
     return app
 
 
