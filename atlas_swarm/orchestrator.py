@@ -115,18 +115,44 @@ class SwarmOrchestrator:
         if not top_10:
             return {"success": False, "error": "No opportunities", "steps": steps}
         top = top_10[0]
-        steps["2_ceo"] = (await self.dispatch({"type": "review_opportunities", "opportunities": top_10[:5]}))
-        brief = await self.kie.generate_product_brief({"title": top.get("title", ""), "text": "", "_vertical": vertical})
-        steps["3_brief"] = {"product": brief.get("product_name", "?")}
+        steps["2_ceo"] = await self.dispatch({"type": "review_opportunities", "opportunities": top_10[:5]})
+
+        # Step 3: CTO designs the product (not KIE — CTO owns design)
+        design = await self.dispatch({
+            "type": "design_product",
+            "opportunity": {"title": top.get("title", ""), "domain": top.get("domain", ""), "vertical": vertical},
+        })
+        steps["3_design"] = design
+        brief = design.get("result", {}) if isinstance(design.get("result"), dict) else {"product_name": top.get("title", vertical)[:50], "raw": str(design.get("result", ""))[:1000]}
+
+        # Step 4: Manufacturing print spec
         steps["4_spec"] = await self.dispatch({"type": "generate_print_spec", "product_brief": brief})
+
+        # Step 5: Content production (copy, photos, video, social)
         steps["5_content"] = await self.dispatch({"type": "full_content", "product_brief": brief})
-        steps["6_listing"] = await self.dispatch({"type": "prepare_listing", "content_package": steps["5_content"].get("result", {}), "marketplace": "etsy"})
+
+        # Step 6: Marketplace listing prep
+        content_result = steps["5_content"].get("result", {})
+        if isinstance(content_result, str):
+            content_result = {"raw": content_result, "_product_name": brief.get("product_name", "unnamed")}
+        steps["6_listing"] = await self.dispatch({
+            "type": "prepare_listing",
+            "content_package": content_result,
+            "marketplace": "etsy",
+        })
+
+        # Step 7: CFO unit economics
         steps["7_econ"] = await self.dispatch({"type": "unit_economics", "product": brief})
-        ok = all(s.get("success", False) if isinstance(s, dict) and "success" in s else True for s in steps.values())
-        write_memory("orchestrator", "products", f"Pipeline: {brief.get('product_name', vertical)[:50]}",
+
+        ok = all(
+            s.get("success", False) if isinstance(s, dict) and "success" in s else True
+            for s in steps.values()
+        )
+        product_name = brief.get("product_name", top.get("title", vertical)[:50])
+        write_memory("orchestrator", "products", f"Pipeline: {product_name}",
                      json.dumps(steps, indent=2, default=str)[:3000], confidence=0.7)
         record_metric("orchestrator.pipeline_runs", 1.0, "orchestrator")
-        return {"success": ok, "product": brief.get("product_name"), "steps": steps}
+        return {"success": ok, "product": product_name, "steps": steps}
 
     async def weekly_cycle(self) -> dict:
         log.info("[WEEKLY] DMAIC cycle")

@@ -420,23 +420,25 @@ class RDAgent(SwarmAgent):
             return {"success": True, "result": result["text"]}
 
     async def _innovation_scan(self, task: dict) -> dict:
-        """Scan for innovation opportunities using KIE."""
+        """Scan for innovation opportunities using KIE + IdeaFrog."""
         from .kie import get_kie
         kie = get_kie()
-        verticals = task.get("verticals", None)
-        opportunities = await kie.scan_opportunities(verticals=verticals)
-        scored = await kie.score_with_aim(opportunities, top_n=10)
+        count = task.get("count", 10)
+
+        # Use KIE's production method that queries IdeaFrog's real API
+        top = await kie.select_top_products(count=count)
 
         record_metric("rnd.innovation_scans", 1.0, self.agent_id)
         return {"success": True, "result": {
-            "total_scanned": len(opportunities),
+            "total_scored": len(top),
             "top_10": [
                 {
                     "title": r.get("title", "")[:80],
-                    "rice": r.get("_rice_total", 0),
-                    "verdict": r.get("_verdict", "?"),
+                    "score": r.get("_commercialization_score", 0),
+                    "go": r.get("_aim_assessment", {}).get("go_no_go", "?"),
+                    "domain": r.get("domain", ""),
                 }
-                for r in scored[:10]
+                for r in top[:10]
             ],
         }}
 
