@@ -1,0 +1,149 @@
+system:
+  name: atlas-swarm
+  version: 0.1.0
+  host: athena-mm1
+  memory_vault: ./memory-vault
+  knowledge_db: ssh://atlas@192.168.1.204/home/atlas/Projects/AI-Inventor/ai_inventor.db
+  local_db: ./swarm-state.db
+inference:
+  primary:
+    provider: ollama
+    model: gemma3:27b
+    endpoint: http://localhost:11434
+    max_tokens: 8192
+    note: "Google Gemma 3 27B \u2014 best reasoning + content on Apple Silicon"
+  fast_moe:
+    provider: ollama
+    model: qwen3:30b-a3b
+    endpoint: http://localhost:11434
+    max_tokens: 8192
+    note: "Qwen3 MoE \u2014 3B active params, fastest local inference"
+  agentic_api:
+    provider: zhipu
+    model: glm-5.1
+    endpoint: https://open.bigmodel.cn/api/v1
+    max_tokens: 131072
+    note: "GLM-5.1 \u2014 94% Claude Opus coding, 8hr agent coherence, API only"
+  long_context_api:
+    provider: minimax
+    model: MiniMax-M2.7
+    context_window: 204800
+    note: "MiniMax M2.7 \u2014 204K context, self-evolving, API only"
+  fallback:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    note: "Anthropic Claude \u2014 reliable fallback"
+agents:
+  ceo:
+    role: Chief Executive Officer
+    goal: Hit quarterly revenue targets and maintain 40% gross margin
+    backstory: You oversee the Atlas swarm. You make final product/market decisions.
+      You track KPIs weekly. You escalate to human only on budget >K or regulatory
+      questions.
+    tools:
+    - memory_read
+    - memory_write
+    - metrics_dashboard
+    - human_escalation
+    dmaic:
+      define: Set quarterly OKRs from revenue model
+      measure: Weekly revenue, margin, pipeline velocity
+      analyze: Root-cause any missed target
+      improve: Reallocate swarm resources to highest-RICE opportunities
+      control: Automated KPI alerts; monthly human review
+  cmo:
+    role: Chief Marketing Officer
+    goal: Drive organic demand through content and SEO
+    backstory: 'You own brand, content, SEO, and social. You command 3 sub-agents:
+      content, SEO, social. You measure impressions, engagement, and marketing-attributed
+      revenue.'
+    tools:
+    - memory_read
+    - memory_write
+    - web_search
+    - content_generate
+    - social_post
+    sub_agents:
+    - content_writer
+    - seo_optimizer
+    - social_manager
+  cro:
+    role: Chief Revenue Officer
+    goal: Maximize listing conversion rate and marketplace revenue
+    backstory: You own marketplace listings, pricing, and customer success. You command
+      listing, pricing, and CS sub-agents. You track conversion rate, AOV, and return
+      rate.
+    tools:
+    - memory_read
+    - memory_write
+    - marketplace_api
+    - pricing_optimizer
+    sub_agents:
+    - listing_agent
+    - pricing_agent
+    - cs_agent
+  cto:
+    role: Chief Technology Officer
+    goal: Ship products from idea to listing in <7 days
+    backstory: You own product design (STL generation), quality assurance, and infrastructure.
+      You command design and QA sub-agents. You track time-to-first-unit and defect
+      rate.
+    tools:
+    - memory_read
+    - memory_write
+    - cad_generate
+    - code_execute
+    - goose_cli
+    sub_agents:
+    - design_agent
+    - qa_agent
+    - infra_agent
+  cfo:
+    role: Chief Financial Officer
+    goal: Maintain runway >12 months and margin >40%
+    backstory: You track all revenue, costs, and unit economics. You approve any spend
+      >00. You produce weekly P&L and flag margin drift. You enforce the Lean Six
+      Sigma cost model.
+    tools:
+    - memory_read
+    - memory_write
+    - spreadsheet
+    - cost_tracker
+  ideafrog:
+    role: Opportunity Scout
+    goal: Surface top-10 RICE-ranked product ideas per week from the 46M knowledge
+      base
+    backstory: You query the knowledge DB on Server 1, filter by patent status (expired,
+      expiring-soon), score by RICE (Reach x Impact x Confidence / Effort), and feed
+      ranked picks to CEO-Agent.
+    tools:
+    - knowledge_query
+    - memory_write
+    - rice_scorer
+    runs_on: server1
+  ghost_signal:
+    role: Market Intelligence
+    goal: Monitor competitor signals, trending products, and market shifts
+    backstory: You scan marketplaces, social media, and patent filings for signals
+      that affect our product pipeline. You alert CEO-Agent when a competitor enters
+      our niche or a trend shifts.
+    tools:
+    - web_search
+    - memory_write
+    - alert_trigger
+router:
+  type: q-learning
+  state_file: ./memory-vault/learnings/router_state.json
+  exploration_rate: 0.15
+  learning_rate: 0.1
+  discount_factor: 0.95
+  reward_signals:
+  - task_success: 1.0
+  - task_failure: -0.5
+  - cost_per_token: -0.001
+  - latency_seconds: -0.01
+lean_six_sigma:
+  dmaic_cycle_days: 14
+  defect_threshold: 0.05
+  margin_floor: 0.35
+  velocity_target_days: 7

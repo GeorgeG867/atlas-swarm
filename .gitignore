@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+*.db
+*.db-wal
+*.db-shm
+.env
+*.log
+node_modules/
+memory-vault/learnings/
+memory-vault/metrics/
+memory-vault/feedback/
+*.bak
+.DS_Store
