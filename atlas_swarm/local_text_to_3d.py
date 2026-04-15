@@ -83,14 +83,20 @@ def _image_to_3d(image_path: Path, product_name: str) -> dict:
     }
 
 
-async def text_to_3d_local(description: str, product_name: str = "") -> dict:
+async def text_to_3d_local(
+    description: str,
+    product_name: str = "",
+    filename_stem: str = "",
+) -> dict:
     """Full pipeline: text -> Flux.1 image -> TripoSR GLB.
 
     Runs locally on MM1 with MPS.  No API keys.
+    ``filename_stem`` (optional) gives a deterministic output name — used by
+    the autonomous IdeaFrog driver to dedupe by opportunity id.
     """
     from .visualizer import generate_product_render
 
-    name = product_name or description.replace(" ", "_").replace("/", "_")[:40]
+    name = filename_stem or product_name or description.replace(" ", "_").replace("/", "_")[:40]
 
     # 1. Flux.1 photo
     log.info("[T2-3D] Step 1/2: Flux.1 image for '%s'", description)

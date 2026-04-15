@@ -416,6 +416,58 @@ def create_app():
         from . import local_text_to_3d
         return await local_text_to_3d.text_to_3d_local(description, product_name)
 
+    # ── Autonomous IdeaFrog-driven pipeline ───────────────────────────
+
+    @app.get("/autonomous/health")
+    async def autonomous_health():
+        from . import ideafrog
+        return await ideafrog.health()
+
+    @app.get("/autonomous/opportunities")
+    async def autonomous_opportunities(limit: int = 10):
+        from . import ideafrog
+        return await ideafrog.top_opportunities(limit)
+
+    @app.post("/autonomous/next")
+    async def autonomous_next(min_score: float = 50.0, force: bool = False):
+        """Pull next IdeaFrog opportunity and generate 3D for it.
+
+        If a GLB already exists for that opportunity, returns it (unless force=True).
+        """
+        from . import ideafrog, local_text_to_3d
+        from pathlib import Path
+
+        opp = await ideafrog.next_unrendered(min_score=min_score)
+        if opp is None:
+            return {"success": False, "error": "No opportunities available from IdeaFrog"}
+
+        # Check for existing render (dedupe)
+        existing = ideafrog._existing_glb_for(opp["stem"])
+        if existing is not None and not force:
+            renders_dir = Path.home() / "Projects/atlas-swarm/renders"
+            images = sorted(
+                renders_dir.glob(f"{opp['stem']}*.png"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            return {
+                "success": True,
+                "cached": True,
+                "opportunity": opp,
+                "glb_filename": existing.name,
+                "glb_size_kb": round(existing.stat().st_size / 1024, 1),
+                "image_filename": images[0].name if images else None,
+            }
+
+        result = await local_text_to_3d.text_to_3d_local(
+            description=opp["description"],
+            product_name=opp["title"],
+            filename_stem=opp["stem"],
+        )
+        result["opportunity"] = opp
+        result["cached"] = False
+        return result
+
     # ── Full product pipeline: STL + GLB + Photo ─────────────────────
 
     @app.post("/design/full")

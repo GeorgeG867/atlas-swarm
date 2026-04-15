@@ -3,58 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Atlas Swarm — 3D Product Studio</title>
+<title>Atlas 3D Studio</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0a14; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
 
 #header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    background: rgba(10,10,20,0.95); padding: 8px 16px;
+    background: rgba(10,10,20,0.95); padding: 10px 16px;
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     border-bottom: 1px solid #1e1e30;
 }
 #header h1 { font-size: 14px; color: #00d4ff; white-space: nowrap; }
 
-select, input[type="text"], button {
+input[type="text"], button {
     background: #12122a; color: #ccc; border: 1px solid #2a2a40;
-    padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer;
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
 }
-input[type="text"] { cursor: text; }
-select:hover, button:hover { border-color: #00d4ff; }
+input[type="text"] { cursor: text; min-width: 240px; }
+button:hover { border-color: #00d4ff; }
 button.primary { background: #00d4ff; color: #000; font-weight: 600; border: none; }
 button.primary:hover { background: #33e0ff; }
-button.render-btn { background: #8b5cf6; color: #fff; font-weight: 600; border: none; }
-button.render-btn:hover { background: #a78bfa; }
+button.accent { background: #8b5cf6; color: #fff; font-weight: 600; border: none; }
+button.accent:hover { background: #a78bfa; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-#info-bar {
-    position: fixed; top: 42px; left: 0; right: 0; z-index: 99;
-    background: rgba(10,10,20,0.9); padding: 4px 16px;
-    font-size: 11px; color: #666; border-bottom: 1px solid #1a1a28;
-    display: flex; gap: 16px;
+#opp-panel {
+    position: fixed; top: 56px; left: 12px; z-index: 99;
+    background: rgba(10,10,20,0.92); padding: 12px 14px; border-radius: 8px;
+    border: 1px solid #1e1e30; max-width: 380px; font-size: 12px;
 }
-.info-item { display: flex; gap: 3px; }
-.info-value { color: #999; }
-.info-value.good { color: #4ade80; }
-.info-value.bad { color: #f87171; }
+#opp-panel .title { color: #00d4ff; font-size: 14px; font-weight: 600; margin-bottom: 8px; line-height: 1.3; }
+#opp-panel .row { display: flex; gap: 8px; margin-bottom: 4px; }
+#opp-panel .key { color: #666; min-width: 70px; }
+#opp-panel .val { color: #bbb; flex: 1; }
+#opp-panel .score { color: #4ade80; font-weight: 600; }
+#opp-panel .empty { color: #666; font-style: italic; }
+
+#bottom-strip {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(10,10,20,0.85); padding: 6px 14px; border-radius: 6px;
+    border: 1px solid #1e1e30; font-size: 11px; color: #555;
+}
+#bottom-strip .dims { color: #999; margin-right: 12px; }
+#bottom-strip .good { color: #4ade80; }
 
 #viewer { width: 100vw; height: 100vh; }
 
-#side-panel {
-    position: fixed; right: 12px; top: 70px; z-index: 100;
-    background: rgba(10,10,20,0.95); padding: 10px; border-radius: 8px;
-    border: 1px solid #1e1e30; font-size: 11px; width: 150px;
-}
-#side-panel h3 { font-size: 12px; color: #666; margin-bottom: 6px; }
-.mat-btn {
-    display: block; width: 100%; text-align: left; padding: 4px 6px;
-    margin-bottom: 3px; border-radius: 4px; font-size: 11px;
-}
-.mat-btn.active { border-color: #00d4ff; color: #00d4ff; }
-
 #render-overlay {
     display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 200; background: rgba(0,0,0,0.85);
+    z-index: 200; background: rgba(0,0,0,0.88);
     justify-content: center; align-items: center; flex-direction: column;
 }
 #render-overlay.visible { display: flex; }
@@ -62,14 +61,11 @@ button.render-btn:hover { background: #a78bfa; }
 #render-overlay .close-btn { margin-top: 12px; }
 #render-overlay .status { color: #00d4ff; font-size: 16px; margin: 20px; }
 
-#controls {
-    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
-    background: rgba(10,10,20,0.7); padding: 6px 14px; border-radius: 6px;
-    border: 1px solid #1e1e30; font-size: 11px; color: #444;
-}
 #loading {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
     font-size: 16px; color: #00d4ff; display: none;
+    background: rgba(10,10,20,0.85); padding: 14px 24px; border-radius: 8px;
+    border: 1px solid #1e1e30;
 }
 </style>
 </head>
@@ -77,32 +73,29 @@ button.render-btn:hover { background: #a78bfa; }
 
 <div id="header">
     <h1>Atlas 3D Studio</h1>
-    <select id="stl-select"><option value="">Loading...</option></select>
-    <input type="text" id="design-input" placeholder="Describe anything..." style="width:220px;">
-    <button class="primary" id="btn-generate">Generate</button>
-    <button class="render-btn" id="btn-render">Render Photo</button>
-    <button id="btn-download">Download STL</button>
+    <button class="primary" id="btn-next">&#x21bb; Next Opportunity</button>
+    <input type="text" id="design-input" placeholder="Or describe something custom...">
+    <button id="btn-generate">Generate Custom</button>
+    <button class="accent" id="btn-render">Render Photo</button>
+    <button id="btn-download">Download GLB</button>
 </div>
 
-<div id="info-bar">
-    <div class="info-item"><span>Dims:</span><span class="info-value" id="info-dims">-</span></div>
-    <div class="info-item"><span>Vol:</span><span class="info-value" id="info-vol">-</span></div>
-    <div class="info-item"><span>Wt:</span><span class="info-value" id="info-weight">-</span></div>
-    <div class="info-item"><span>Bed:</span><span class="info-value" id="info-print">-</span></div>
+<div id="opp-panel">
+    <div class="title" id="opp-title">Loading opportunity...</div>
+    <div class="row"><span class="key">Market:</span><span class="val" id="opp-market">&mdash;</span></div>
+    <div class="row"><span class="key">Size:</span><span class="val" id="opp-size">&mdash;</span></div>
+    <div class="row"><span class="key">Revenue:</span><span class="val" id="opp-revenue">&mdash;</span></div>
+    <div class="row"><span class="key">Score:</span><span class="val score" id="opp-score">&mdash;</span></div>
+    <div class="row"><span class="key">TRIZ:</span><span class="val" id="opp-triz">&mdash;</span></div>
+    <div class="row"><span class="key">Source:</span><span class="val" id="opp-source">IdeaFrog</span></div>
 </div>
 
 <div id="viewer"></div>
 
-<div id="side-panel">
-    <h3>Material</h3>
-    <button class="mat-btn active" data-color="0xf5f5f0" data-rough="0.25" data-metal="0.0" data-clear="0.4">White PLA</button>
-    <button class="mat-btn" data-color="0x1a1a1a" data-rough="0.2" data-metal="0.0" data-clear="0.6">Black PETG</button>
-    <button class="mat-btn" data-color="0xc0c0c0" data-rough="0.1" data-metal="0.85" data-clear="0.0">Brushed Metal</button>
-    <button class="mat-btn" data-color="0xc9956b" data-rough="0.55" data-metal="0.0" data-clear="0.0">Wood PLA</button>
-    <button class="mat-btn" data-color="0xe8ddd0" data-rough="0.5" data-metal="0.0" data-clear="0.0">Matte Beige</button>
-    <button class="mat-btn" data-color="0x2563eb" data-rough="0.22" data-metal="0.0" data-clear="0.5">Blue PLA</button>
-    <button class="mat-btn" data-color="0xdc2626" data-rough="0.22" data-metal="0.0" data-clear="0.5">Red PLA</button>
-    <button class="mat-btn" data-color="0xf0f0f0" data-rough="0.0" data-metal="0.0" data-clear="1.0">Clear Resin</button>
+<div id="bottom-strip">
+    <span class="dims" id="info-dims">&mdash;</span>
+    <span class="dims" id="info-verts">&mdash;</span>
+    <span id="info-file">&mdash;</span>
 </div>
 
 <div id="render-overlay">
@@ -111,7 +104,6 @@ button.render-btn:hover { background: #a78bfa; }
     <button class="close-btn" onclick="document.getElementById('render-overlay').classList.remove('visible')">Close</button>
 </div>
 
-<div id="controls">Drag: rotate | Right-drag: pan | Scroll: zoom | Dbl-click: reset</div>
 <div id="loading"></div>
 
 <script type="importmap">
@@ -125,333 +117,223 @@ button.render-btn:hover { background: #a78bfa; }
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
-// ── Scene ──
+// ── Scene ───────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a14);
 
-const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 5000);
-camera.position.set(180, 120, 220);
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.01, 5000);
+camera.position.set(2.5, 1.8, 2.5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.4;
+renderer.toneMappingExposure = 1.3;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.getElementById('viewer').appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.target.set(0, 15, 0);
 
-// ── Environment Map (procedural studio HDRI) ──
-const pmremGenerator = new THREE.PMREMGenerator(renderer);
-pmremGenerator.compileEquirectangularShader();
-
-function createStudioEnv() {
+// ── Procedural studio environment ───────────────────────────
+const pmrem = new THREE.PMREMGenerator(renderer);
+(function setEnv() {
     const size = 256;
     const data = new Float32Array(size * size * 4);
     for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
             const i = (y * size + x) * 4;
             const ny = y / size;
-            // Gradient: warm top → cool bottom with bright band at horizon
             const horizon = Math.exp(-Math.pow((ny - 0.5) * 6, 2)) * 0.8;
             const sky = Math.max(0, 1.0 - ny) * 0.15;
-            const ground = Math.max(0, ny - 0.5) * 0.08;
-            data[i]     = 0.12 + horizon * 0.9 + sky * 0.3 + ground * 0.1;  // R
-            data[i + 1] = 0.12 + horizon * 0.85 + sky * 0.35 + ground * 0.1; // G
-            data[i + 2] = 0.15 + horizon * 0.95 + sky * 0.5 + ground * 0.15; // B
+            data[i]     = 0.12 + horizon * 0.9 + sky * 0.3;
+            data[i + 1] = 0.12 + horizon * 0.85 + sky * 0.35;
+            data[i + 2] = 0.15 + horizon * 0.95 + sky * 0.5;
             data[i + 3] = 1.0;
         }
     }
     const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.needsUpdate = true;
-    const envMap = pmremGenerator.fromEquirectangular(tex).texture;
+    scene.environment = pmrem.fromEquirectangular(tex).texture;
     tex.dispose();
-    return envMap;
-}
+})();
 
-const envMap = createStudioEnv();
-scene.environment = envMap;
+const keyLight = new THREE.DirectionalLight(0xfff5e8, 2.2);
+keyLight.position.set(3, 5, 3); keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048); scene.add(keyLight);
+scene.add(new THREE.DirectionalLight(0xc8d8ff, 0.7));
+scene.add(new THREE.AmbientLight(0x202030, 0.4));
 
-// ── Lighting — cinematic 4-point ──
-const keyLight = new THREE.DirectionalLight(0xfff5e8, 2.0);
-keyLight.position.set(150, 300, 200);
-keyLight.castShadow = true;
-keyLight.shadow.mapSize.set(2048, 2048);
-keyLight.shadow.camera.far = 800;
-keyLight.shadow.bias = -0.001;
-scene.add(keyLight);
-
-const fillLight = new THREE.DirectionalLight(0xc8d8ff, 0.7);
-fillLight.position.set(-200, 150, -80);
-scene.add(fillLight);
-
-const rimLight = new THREE.DirectionalLight(0xffffff, 1.0);
-rimLight.position.set(0, 80, -300);
-scene.add(rimLight);
-
-const bottomFill = new THREE.DirectionalLight(0x404080, 0.3);
-bottomFill.position.set(0, -100, 0);
-scene.add(bottomFill);
-
-scene.add(new THREE.AmbientLight(0x202030, 0.3));
-
-// ── Ground — reflective studio floor ──
-const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1000, 1000),
-    new THREE.MeshStandardMaterial({
-        color: 0x0d0d18, roughness: 0.6, metalness: 0.1, envMap,
-    })
+// ── Subtle floor (much smaller now since GLBs are ~1 unit scale) ──
+const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(5, 64),
+    new THREE.MeshStandardMaterial({ color: 0x0d0d18, roughness: 0.65, metalness: 0.05 })
 );
-ground.rotation.x = -Math.PI / 2;
-ground.position.y = -0.5;
-ground.receiveShadow = true;
-scene.add(ground);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
+scene.add(floor);
 
-const grid = new THREE.GridHelper(400, 20, 0x181830, 0x101020);
-grid.position.y = -0.4;
-scene.add(grid);
-
-// ── Material — PBR Physical Material with clearcoat ──
-const material = new THREE.MeshPhysicalMaterial({
-    color: 0xf5f5f0,
-    roughness: 0.25,
-    metalness: 0.0,
-    clearcoat: 0.4,
-    clearcoatRoughness: 0.15,
-    envMap: envMap,
-    envMapIntensity: 1.2,
-});
-
-// ── State ──
+// ── State ────────────────────────────────────────────────────
 let currentMesh = null;
-let currentProductName = '';
-const stlLoader = new STLLoader();
+let currentOpp = null;
+let currentGLB = null;
 const gltfLoader = new GLTFLoader();
 
 function clearModel() {
-    if (currentMesh) {
-        scene.remove(currentMesh);
-        currentMesh.traverse(child => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-                if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                else child.material.dispose();
-            }
-        });
-        currentMesh = null;
-    }
+    if (!currentMesh) return;
+    scene.remove(currentMesh);
+    currentMesh.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose());
+    });
+    currentMesh = null;
 }
 
 function fitCamera(obj) {
     const box = new THREE.Box3().setFromObject(obj);
     const size = new THREE.Vector3(); box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-    camera.position.set(maxDim * 1.3, maxDim * 0.8, maxDim * 1.3);
-    controls.target.set(0, size.y / 3, 0);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    camera.position.set(center.x + maxDim * 1.6, center.y + maxDim * 1.0, center.z + maxDim * 1.6);
+    controls.target.copy(center);
     controls.update();
 
-    const d = document;
-    d.getElementById('info-dims').textContent = `${size.x.toFixed(0)}x${size.y.toFixed(0)}x${size.z.toFixed(0)}mm`;
-    const vol = (size.x * size.y * size.z / 1e6).toFixed(1);
-    d.getElementById('info-vol').textContent = `${vol}cm\u00B3`;
-    d.getElementById('info-weight').textContent = `${(vol * 1.24).toFixed(0)}g`;
-    const fits = size.x <= 256 && size.y <= 256 && size.z <= 256;
-    d.getElementById('info-print').textContent = fits ? 'Fits' : 'TOO BIG';
-    d.getElementById('info-print').className = 'info-value ' + (fits ? 'good' : 'bad');
+    document.getElementById('info-dims').textContent =
+        `${size.x.toFixed(2)}\u00D7${size.y.toFixed(2)}\u00D7${size.z.toFixed(2)}`;
 }
 
-function loadGLB(url, name) {
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('loading').textContent = 'Loading textured model...';
+function loadGLB(url, filename) {
+    const ld = document.getElementById('loading');
+    ld.style.display = 'block';
+    ld.textContent = 'Loading 3D model...';
     clearModel();
 
     gltfLoader.load(url, (gltf) => {
         const model = gltf.scene;
-        // Center it
-        const box = new THREE.Box3().setFromObject(model);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        model.position.sub(center);
-        model.position.y = -box.min.y + center.y;
-        // Enable shadows
-        model.traverse(child => {
-            if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
-        });
+        model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
         scene.add(model);
         currentMesh = model;
-        currentProductName = name;
+        currentGLB = filename;
         fitCamera(model);
-        document.getElementById('loading').style.display = 'none';
+
+        let verts = 0;
+        model.traverse(c => { if (c.geometry) verts += c.geometry.attributes.position.count; });
+        document.getElementById('info-verts').textContent = `${verts.toLocaleString()} verts`;
+        document.getElementById('info-file').textContent = filename;
+        ld.style.display = 'none';
     }, undefined, (err) => {
-        document.getElementById('loading').textContent = 'GLB error — falling back to STL';
-        // Try STL fallback
-        const stlUrl = url.replace('.glb', '.stl');
-        loadSTL(stlUrl, name);
+        ld.textContent = 'Model load error: ' + (err.message || 'unknown');
+        setTimeout(() => { ld.style.display = 'none'; }, 3000);
     });
 }
 
-function loadSTL(url, name) {
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('loading').textContent = 'Loading model...';
-    clearModel();
-
-    stlLoader.load(url, (geometry) => {
-        geometry.computeVertexNormals();
-        geometry.computeBoundingBox();
-
-        const center = new THREE.Vector3();
-        geometry.boundingBox.getCenter(center);
-        geometry.translate(-center.x, -center.y, -center.z);
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-
-        const box = new THREE.Box3().setFromObject(mesh);
-        mesh.position.y = -box.min.y;
-        scene.add(mesh);
-        currentMesh = mesh;
-        currentProductName = name;
-
-        fitCamera(mesh);
-        document.getElementById('loading').style.display = 'none';
-    }, undefined, (err) => {
-        document.getElementById('loading').textContent = 'Error: ' + err.message;
-    });
+// ── Display opportunity metadata ─────────────────────────────
+function showOpportunity(opp) {
+    currentOpp = opp || {};
+    const titleEl = document.getElementById('opp-title');
+    const d = document;
+    if (!opp) {
+        titleEl.textContent = 'No opportunity loaded';
+        titleEl.className = 'title empty';
+        ['opp-market','opp-size','opp-revenue','opp-score','opp-triz'].forEach(id => d.getElementById(id).textContent = '\u2014');
+        return;
+    }
+    titleEl.className = 'title';
+    titleEl.textContent = opp.title || 'Untitled';
+    d.getElementById('opp-market').textContent = opp.market || '\u2014';
+    d.getElementById('opp-size').textContent = opp.market_size || '\u2014';
+    d.getElementById('opp-revenue').textContent = opp.revenue_model || '\u2014';
+    d.getElementById('opp-score').textContent = opp.swarm_score ? `${opp.swarm_score}/100` : '\u2014';
+    d.getElementById('opp-triz').textContent = opp.triz_principle || '\u2014';
+    d.getElementById('opp-source').textContent = opp.source || 'IdeaFrog';
 }
 
-// ── Populate dropdown ──
-async function refreshModels(preferFile) {
-    const sel = document.getElementById('stl-select');
+// ── Pull next IdeaFrog opportunity + render ──────────────────
+async function loadNextOpportunity() {
+    const btn = document.getElementById('btn-next');
+    const ld = document.getElementById('loading');
+    btn.disabled = true;
+    const start = Date.now();
+    const ticker = setInterval(() => {
+        const s = Math.round((Date.now() - start) / 1000);
+        ld.textContent = `Fetching opportunity + rendering... ${s}s`;
+    }, 1000);
+    ld.style.display = 'block';
+    ld.textContent = 'Fetching opportunity + rendering... 0s';
+
     try {
-        const data = await (await fetch('/cad/renders?_=' + Date.now())).json();
-        // Prefer GLB (textured), fall back to STL
-        const models = data.filter(f => f.name.endsWith('.glb') || f.name.endsWith('.stl'));
-        // Dedupe: if a GLB exists for a product, skip its STL
-        const glbNames = new Set(models.filter(f => f.name.endsWith('.glb')).map(f => f.name.replace('.glb', '')));
-        const deduped = models.filter(f => {
-            if (f.name.endsWith('.stl') && glbNames.has(f.name.replace('.stl', ''))) return false;
-            return true;
-        });
-        sel.innerHTML = '';
-        if (!deduped.length) { sel.innerHTML = '<option value="">No models</option>'; return; }
-        deduped.forEach(f => {
-            const o = document.createElement('option');
-            o.value = `/renders/${f.name}`;
-            const tag = f.name.endsWith('.glb') ? ' [3D]' : ' [CAD]';
-            const pretty = f.name.replace(/_\d{9,}\.(stl|glb|step|obj)$/i, '');
-            o.textContent = `${pretty}${tag} (${f.size_kb}KB)`;
-            sel.appendChild(o);
-        });
-        // If a specific file was requested, select it — otherwise use newest
-        if (preferFile) {
-            const match = [...sel.options].find(o => o.value.includes(preferFile));
-            if (match) sel.value = match.value;
+        const res = await fetch('/autonomous/next', { method: 'POST' });
+        const data = await res.json();
+        clearInterval(ticker);
+        if (!data.success || !data.glb_filename) {
+            ld.textContent = `Error: ${data.error || 'no GLB returned'}`;
+            setTimeout(() => { ld.style.display = 'none'; }, 4000);
+            return;
         }
-        loadModel(sel.value, sel.value.split('/').pop());
-    } catch {
-        sel.innerHTML = '<option value="/renders/stabilizer_v1.stl">stabilizer_v1</option>';
-        loadSTL('/renders/stabilizer_v1.stl', 'stabilizer');
+        showOpportunity(data.opportunity);
+        loadGLB(`/renders/${data.glb_filename}?_=${Date.now()}`, data.glb_filename);
+    } catch (err) {
+        clearInterval(ticker);
+        ld.textContent = 'Error: ' + err.message;
+        setTimeout(() => { ld.style.display = 'none'; }, 4000);
+    } finally {
+        btn.disabled = false;
     }
 }
 
-function loadModel(url, name) {
-    if (url.endsWith('.glb')) loadGLB(url, name);
-    else loadSTL(url, name);
-}
-
-// ── Events ──
-document.getElementById('stl-select').addEventListener('change', e => {
-    if (e.target.value) loadModel(e.target.value, e.target.value);
-});
-
-document.getElementById('design-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('btn-generate').click();
-});
-
-document.getElementById('btn-generate').addEventListener('click', async () => {
+// ── Manual override: generate from custom description ────────
+async function generateCustom() {
     const input = document.getElementById('design-input');
     const desc = input.value.trim();
     if (!desc) { input.focus(); return; }
     const ld = document.getElementById('loading');
-    ld.style.display = 'block';
-    ld.textContent = `Designing "${desc}"...`;
     input.disabled = true;
+
+    const start = Date.now();
+    const ticker = setInterval(() => {
+        const s = Math.round((Date.now() - start) / 1000);
+        ld.textContent = `Generating "${desc}"... ${s}s`;
+    }, 1000);
+    ld.style.display = 'block';
+    ld.textContent = `Generating "${desc}"... 0s`;
+
     try {
-        // Local text-to-3D pipeline: Flux.1 image -> TripoSR GLB
-        // No API keys, runs entirely on MM1 MPS
         const safeName = desc.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
-
-        // Live ticker so the user sees actual progress instead of a fake ETA
-        const genStart = Date.now();
-        const genTicker = setInterval(() => {
-            const s = Math.round((Date.now() - genStart) / 1000);
-            ld.textContent = `Generating "${desc}"... ${s}s`;
-        }, 1000);
-        ld.textContent = `Generating "${desc}"... 0s`;
-
-        let t2Data;
-        try {
-            const t2Res = await fetch(
-                `/text-to-3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`,
-                { method: 'POST' }
-            );
-            t2Data = await t2Res.json();
-        } finally {
-            clearInterval(genTicker);
+        const res = await fetch(
+            `/text-to-3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`,
+            { method: 'POST' }
+        );
+        const data = await res.json();
+        clearInterval(ticker);
+        if (!data.success || !data.glb_filename) {
+            ld.textContent = `Error: ${data.error || 'no GLB'}`;
+            setTimeout(() => { ld.style.display = 'none'; }, 4000);
+            return;
         }
-
-        let targetFile = null;
-        if (t2Data.success && t2Data.glb_filename) {
-            ld.textContent = `GLB ready (${t2Data.vertices} verts, ${t2Data.total_time_s}s)`;
-            targetFile = t2Data.glb_filename;
-        } else {
-            // Fall back to CadQuery STL if local pipeline fails
-            ld.textContent = `Falling back to CadQuery STL...`;
-            const stlRes = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
-            const stlData = await stlRes.json();
-            targetFile = stlData.stl_file || stlData.stl_filename;
-            if (!targetFile) {
-                alert(`Generation failed: ${t2Data.error || stlData.error || 'unknown'}`);
-                ld.style.display = 'none';
-                return;
-            }
-        }
-
-        await refreshModels(targetFile);
+        showOpportunity({
+            title: desc, source: 'user', market: null, market_size: null,
+            revenue_model: null, swarm_score: null, triz_principle: null,
+        });
+        loadGLB(`/renders/${data.glb_filename}?_=${Date.now()}`, data.glb_filename);
         input.value = '';
     } catch (err) {
-        alert('Error: ' + err.message);
-        ld.style.display = 'none';
+        clearInterval(ticker);
+        ld.textContent = 'Error: ' + err.message;
+        setTimeout(() => { ld.style.display = 'none'; }, 4000);
     } finally {
         input.disabled = false;
-        input.focus();
     }
-});
-
-// ── Derive a clean product name from any filename (stl/glb/step/png) ──
-function extractProductName(filename) {
-    if (!filename) return '';
-    return filename
-        .replace(/\.[a-z0-9]+$/i, '')       // strip extension
-        .replace(/_\d{9,}$/, '')             // strip trailing _<timestamp>
-        .replace(/_/g, ' ')                  // underscores → spaces
-        .trim();
 }
 
-// ── Render Photo — uses whatever the server says, not hardcoded text ──
-document.getElementById('btn-render').addEventListener('click', async () => {
-    const name = extractProductName(currentProductName) || 'product';
+// ── Render Photo (Flux.1 reuse) ──────────────────────────────
+async function renderPhoto() {
+    const name = (currentOpp && currentOpp.title) ? currentOpp.title : 'product';
+    const desc = (currentOpp && currentOpp.description) ? currentOpp.description : name;
     const overlay = document.getElementById('render-overlay');
     const status = document.getElementById('render-status');
     const img = document.getElementById('render-image');
@@ -460,89 +342,62 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     status.style.display = 'block';
 
     const start = Date.now();
-    let ticker = null;
-    const updateElapsed = () => {
-        const s = Math.round((Date.now() - start) / 1000);
-        status.textContent = `Rendering "${name}"... ${s}s`;
-    };
-    updateElapsed();
-    ticker = setInterval(updateElapsed, 1000);
+    const ticker = setInterval(() => {
+        status.textContent = `Rendering "${name}"... ${Math.round((Date.now() - start) / 1000)}s`;
+    }, 1000);
+    status.textContent = `Rendering "${name}"... 0s`;
 
     try {
-        const matBtn = document.querySelector('.mat-btn.active');
-        const matName = matBtn ? matBtn.textContent.trim() : 'white plastic';
-        const res = await fetch(
-            `/visualize?product_name=${encodeURIComponent(name)}` +
-            `&description=${encodeURIComponent(name)}` +
-            `&material=${encodeURIComponent(matName)}`,
+        const r = await fetch(
+            `/visualize?product_name=${encodeURIComponent(name)}&description=${encodeURIComponent(desc)}&material=${encodeURIComponent('natural product appearance')}`,
             { method: 'POST' }
         );
-        const data = await res.json();
+        const data = await r.json();
         clearInterval(ticker);
-
-        const elapsed = data.generation_time_s || Math.round((Date.now() - start) / 1000);
-        const model = data.model || 'unknown';
-
         if (data.image_base64) {
             img.src = `data:image/png;base64,${data.image_base64}`;
-            img.style.display = 'block';
-            status.style.display = 'none';
+            img.style.display = 'block'; status.style.display = 'none';
         } else if (data.image_path) {
-            const fname = data.image_path.split('/').pop();
-            img.src = `/renders/${fname}`;
-            img.style.display = 'block';
-            status.style.display = 'none';
+            img.src = `/renders/${data.image_path.split('/').pop()}`;
+            img.style.display = 'block'; status.style.display = 'none';
         } else {
-            status.textContent = `No image returned (model=${model}, ${elapsed}s)`;
+            status.textContent = `No image returned (${data.model || 'unknown'})`;
         }
     } catch (err) {
-        if (ticker) clearInterval(ticker);
-        status.textContent = 'Render error: ' + err.message;
+        clearInterval(ticker);
+        status.textContent = 'Error: ' + err.message;
     }
+}
+
+function downloadGLB() {
+    if (!currentGLB) return;
+    const a = document.createElement('a');
+    a.href = `/renders/${currentGLB}`;
+    a.download = currentGLB;
+    a.click();
+}
+
+// ── Wire up events ──────────────────────────────────────────
+document.getElementById('btn-next').addEventListener('click', loadNextOpportunity);
+document.getElementById('btn-generate').addEventListener('click', generateCustom);
+document.getElementById('btn-render').addEventListener('click', renderPhoto);
+document.getElementById('btn-download').addEventListener('click', downloadGLB);
+document.getElementById('design-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') generateCustom();
 });
 
-document.getElementById('btn-download').addEventListener('click', () => {
-    const sel = document.getElementById('stl-select');
-    if (sel.value) { const a = document.createElement('a'); a.href = sel.value; a.download = sel.value.split('/').pop(); a.click(); }
-});
-
-// ── Material buttons ──
-document.querySelectorAll('.mat-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        material.color.setHex(parseInt(btn.dataset.color));
-        material.roughness = parseFloat(btn.dataset.rough);
-        material.metalness = parseFloat(btn.dataset.metal);
-        material.clearcoat = parseFloat(btn.dataset.clear);
-    });
-});
-
-// ── Camera reset ──
-renderer.domElement.addEventListener('dblclick', () => {
-    if (currentMesh) {
-        const box = new THREE.Box3().setFromObject(currentMesh);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const m = Math.max(size.x, size.y, size.z);
-        camera.position.set(m * 1.3, m * 0.8, m * 1.3);
-        controls.target.set(0, size.y / 3, 0);
-    }
-    controls.update();
-});
-
+renderer.domElement.addEventListener('dblclick', () => { if (currentMesh) fitCamera(currentMesh); });
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// URL param support
-const stlParam = new URLSearchParams(window.location.search).get('stl');
-
 function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
 animate();
 
-refreshModels().then(() => { if (stlParam) loadSTL(`/renders/${stlParam}`, stlParam); });
+// ── Auto-load first opportunity on page load ────────────────
+loadNextOpportunity();
 </script>
 </body>
 </html>
