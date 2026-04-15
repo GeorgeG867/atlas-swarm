@@ -227,12 +227,12 @@ def create_app():
 
     @app.get("/kie/scan")
     async def kie_scan(vertical: str = "medical device", limit: int = 10):
-        opps = await orch.kie.scan_opportunities(verticals=[vertical], limit_per_vertical=limit)
-        return await orch.kie.score_with_aim(opps, top_n=limit)
+        opps = await orch.kie.get_opportunities(limit=limit)
+        return {"opportunities": opps, "count": len(opps)}
 
     @app.get("/kie/report")
     async def kie_report():
-        return await orch.kie.weekly_pipeline_report()
+        return await orch.kie.run_pipeline()
 
     @app.get("/bridge/health")
     async def bh():
@@ -300,18 +300,57 @@ def create_app():
     # ── CAD Engine endpoints (v2.1) ──────────────────────────────────
 
     @app.post("/design")
-    async def design_product(product_type: str = "phone_stand", params: str = "{}"):
-        """Generate a product STL from the parametric library.
+    async def design_product(description: str = "", product_type: str = "", params: str = "{}"):
+        """Generate a product STL — from library OR free-text description.
 
-        params is a JSON string of parameter overrides.
-        Example: /design?product_type=phone_stand&params={"width":90}
+        If product_type matches a library entry, uses parametric generation.
+        Otherwise treats the input as a free-text description and routes
+        through the CTO agent, which writes CadQuery code via AIM.
+
+        Examples:
+            POST /design?product_type=phone_stand&params={"width":90}
+            POST /design?description=toy car with rounded edges
+            POST /design?description=wall-mounted guitar hook
         """
-        from . import cad_engine
+        from . import cad_engine, cad_library
+
         try:
             parsed = json.loads(params)
         except json.JSONDecodeError:
-            return {"success": False, "error": "Invalid JSON in params"}
-        return cad_engine.generate_from_library(product_type, parsed)
+            parsed = {}
+
+        # Combine inputs — description takes priority, product_type is fallback
+        text = description.strip() or product_type.strip()
+        if not text:
+            return {"success": False, "error": "Provide description or product_type"}
+
+        # Try library match first (fast path, no LLM)
+        matched = cad_engine.match_product_type(text)
+        if matched and not description:
+            # Exact library hit via product_type param
+            return cad_engine.generate_from_library(matched, parsed)
+
+        if matched and description:
+            # Library match from description — route through CTO for param tuning
+            result = await orch.dispatch({
+                "type": "design_product",
+                "opportunity": {"title": text, "description": description},
+            })
+            inner = result.get("result")
+            if inner is not None:
+                return inner
+            return {"success": result.get("success", False), "error": result.get("error", "No result"), "dispatch": result}
+
+        # No library match — CTO agent generates CadQuery code via LLM
+        result = await orch.dispatch({
+            "type": "design_product",
+            "opportunity": {"title": text, "description": text},
+        })
+        # Unwrap dispatch envelope; preserve errors
+        inner = result.get("result")
+        if inner is not None:
+            return inner
+        return {"success": result.get("success", False), "error": result.get("error", "No result from CTO agent"), "dispatch": result}
 
     @app.get("/products")
     async def list_products():
@@ -333,10 +372,50 @@ def create_app():
         from . import cad_engine
         return cad_engine.list_renders()
 
+
+    @app.get("/debug/bridge")
+    async def debug_bridge():
+        import httpx, socket, asyncio, subprocess, os
+        results = {}
+        # Test 0: network interfaces and routing
+        try:
+            r = subprocess.run(["route", "-n", "get", "192.168.1.204"], capture_output=True, text=True, timeout=5)
+            results["route"] = r.stdout.strip()[:300]
+        except Exception as e:
+            results["route"] = str(e)
+        try:
+            r = subprocess.run(["curl", "-s", "--connect-timeout", "3", "http://192.168.1.204:8000/health"], capture_output=True, text=True, timeout=10)
+            results["curl_test"] = r.stdout[:200]
+        except Exception as e:
+            results["curl_test"] = str(e)
+        results["env_path"] = os.environ.get("PATH", "?")
+        results["pid"] = os.getpid()
+        # Test 1: socket
+        try:
+            s = socket.create_connection(("192.168.1.204", 8000), timeout=5)
+            results["socket"] = "connected"
+            s.close()
+        except Exception as e:
+            results["socket"] = str(e)
+        # Test 2: httpx one-shot
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                r = await c.get("http://192.168.1.204:8000/health")
+                results["httpx_oneshot"] = f"status={r.status_code}"
+        except Exception as e:
+            results["httpx_oneshot"] = str(e)
+        # Test 3: bridge singleton
+        try:
+            h = await get_bridge().health()
+            results["bridge_singleton"] = h
+        except Exception as e:
+            results["bridge_singleton"] = str(e)
+        return results
+
     return app
 
 
 if __name__ == "__main__":
     import uvicorn
     app = create_app()
-    uvicorn.run(app, host="0.0.0.0", port=8100)
+    uvicorn.run(app, host="0.0.0.0", port=8100, loop="asyncio")

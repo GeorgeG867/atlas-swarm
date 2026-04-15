@@ -165,65 +165,122 @@ def generate_from_library(product_type: str, params: Optional[dict] = None) -> d
 # LLM-code generation (sandboxed exec)
 # ═══════════════════════════════════════════════════════════════════════
 
-_SAFE_BUILTINS = {
-    "range": range, "int": int, "float": float, "round": round,
-    "min": min, "max": max, "abs": abs, "len": len,
-    "list": list, "tuple": tuple, "dict": dict,
-    "True": True, "False": False, "None": None,
-    "print": lambda *a, **k: None,
-    "enumerate": enumerate, "zip": zip,
-    "isinstance": isinstance, "type": type,
-}
+def _make_safe_builtins() -> dict:
+    """All standard builtins EXCEPT import, eval, exec, open, and I/O."""
+    import builtins
+    blocked = {
+        "__import__", "eval", "exec", "compile",
+        "open", "input", "breakpoint",
+        "exit", "quit", "help", "credits", "license",
+        "globals", "locals", "vars", "dir", "delattr", "setattr", "getattr",
+        "memoryview", "__build_class__",
+    }
+    safe = {k: v for k, v in vars(builtins).items() if k not in blocked}
+    safe["print"] = lambda *a, **k: None  # suppress output
+    safe["__import__"] = None  # explicitly block
+    return safe
+
+
+_SAFE_BUILTINS = _make_safe_builtins()
+
+
+def _strip_imports(code: str) -> str:
+    """Remove import lines and fix indentation — cq and math are pre-injected."""
+    import textwrap
+    lines = code.split("\n")
+    cleaned = [ln for ln in lines if not ln.strip().startswith(("import ", "from "))]
+    return textwrap.dedent("\n".join(cleaned))
+
+
+def _strip_fillets(code: str) -> str:
+    """Remove .fillet() and .chamfer() calls — last resort when they crash OCCT."""
+    import re
+    code = re.sub(r'\.fillet\([^)]*\)', '', code)
+    code = re.sub(r'\.chamfer\([^)]*\)', '', code)
+    # Also remove standalone try/except blocks that only wrapped fillets
+    code = re.sub(r'try:\s*\n\s*\n\s*except[^\n]*\n\s*pass', '', code)
+    return code
 
 
 def generate_from_code(cadquery_code: str, product_name: str = "custom") -> dict:
     """Execute LLM-written CadQuery code in a restricted namespace.
 
-    The code **must** assign the finished solid to ``result``.
+    Auto-detects result variable. Retries without fillets on OCCT errors.
+    ``import`` statements are stripped — cq and math are pre-loaded.
     """
-    ns = {"cq": cq, "math": math, "__builtins__": _SAFE_BUILTINS}
+    clean_code = _strip_imports(cadquery_code)
 
-    try:
-        log.info("[CAD] Executing custom code for '%s'", product_name)
-        t0 = time.monotonic()
+    last_err = None
+    # Try with fillets first, retry without if they crash OCCT
+    for attempt, code_variant in enumerate([clean_code, _strip_fillets(clean_code)]):
+        ns = {"cq": cq, "math": math, "__builtins__": _SAFE_BUILTINS}
+        try:
+            if attempt == 0:
+                log.info("[CAD] Executing custom code for '%s'", product_name)
+            else:
+                log.info("[CAD] Retrying '%s' without fillets/chamfers", product_name)
+            t0 = time.monotonic()
 
-        exec(cadquery_code, ns)  # noqa: S102
+            exec(code_variant, ns)  # noqa: S102
 
-        solid = ns.get("result")
-        if solid is None:
-            return {"success": False, "error": "Code must assign final geometry to `result`"}
-        if not isinstance(solid, cq.Workplane):
-            return {"success": False, "error": f"result must be cq.Workplane, got {type(solid).__name__}"}
+            solid = ns.get("result")
 
-        validation = validate_geometry(solid)
+            # Auto-detect: if `result` not set, find the last Workplane in namespace
+            if solid is None:
+                candidates = [
+                    (k, v) for k, v in ns.items()
+                    if isinstance(v, cq.Workplane) and not k.startswith("_")
+                ]
+                if candidates:
+                    solid = candidates[-1][1]
+                    log.info("[CAD] Auto-detected result from variable '%s'", candidates[-1][0])
 
-        ts = int(time.time())
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in product_name)[:40]
-        stl = RENDERS_DIR / f"{safe}_{ts}.stl"
-        step = RENDERS_DIR / f"{safe}_{ts}.step"
+            if solid is None:
+                var_names = [k for k in ns if not k.startswith("_") and k not in ("cq", "math")]
+                last_err = f"No CadQuery solid found. Variables: {var_names[:10]}"
+                continue
 
-        cq.exporters.export(solid, str(stl))
-        cq.exporters.export(solid, str(step))
+            if not isinstance(solid, cq.Workplane):
+                last_err = f"result must be cq.Workplane, got {type(solid).__name__}"
+                continue
 
-        elapsed = time.monotonic() - t0
+            validation = validate_geometry(solid)
 
-        return {
-            "success": True,
-            "product_name": product_name,
-            "stl_path": str(stl),
-            "stl_filename": stl.name,
-            "stl_size_kb": round(stl.stat().st_size / 1024, 1),
-            "step_path": str(step),
-            "step_filename": step.name,
-            "validation": validation,
-            "generation_time_s": round(elapsed, 2),
-            "code_lines": cadquery_code.count("\n") + 1,
-        }
+            ts = int(time.time())
+            safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in product_name)[:40]
+            stl = RENDERS_DIR / f"{safe}_{ts}.stl"
+            step = RENDERS_DIR / f"{safe}_{ts}.step"
 
-    except SyntaxError as exc:
-        return {"success": False, "error": f"Syntax error: {exc}"}
-    except Exception as exc:
-        return {"success": False, "error": str(exc), "traceback": traceback.format_exc()}
+            cq.exporters.export(solid, str(stl))
+            cq.exporters.export(solid, str(step))
+
+            elapsed = time.monotonic() - t0
+
+            return {
+                "success": True,
+                "product_name": product_name,
+                "stl_path": str(stl),
+                "stl_filename": stl.name,
+                "stl_size_kb": round(stl.stat().st_size / 1024, 1),
+                "step_path": str(step),
+                "step_filename": step.name,
+                "validation": validation,
+                "generation_time_s": round(elapsed, 2),
+                "code_lines": cadquery_code.count("\n") + 1,
+            }
+
+        except SyntaxError as exc:
+            last_err = f"Syntax error: {exc}"
+        except Exception as exc:
+            last_err = str(exc)
+            # Fillet/chamfer errors are worth retrying without them
+            if attempt == 0 and any(kw in str(exc).lower() for kw in ("fillet", "chamfer", "edge", "wire")):
+                log.warning("[CAD] Fillet-related error, will retry: %s", exc)
+                continue
+            if attempt > 0:
+                break
+
+    return {"success": False, "error": last_err or "Unknown error", "traceback": traceback.format_exc()}
 
 
 # ═══════════════════════════════════════════════════════════════════════

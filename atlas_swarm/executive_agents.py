@@ -263,7 +263,11 @@ class CTOAgent(SwarmAgent):
             result = await self._design_from_llm_code(opportunity)
 
         if not result.get("success"):
-            return result
+            return {"success": False, "result": {
+                "error": result.get("error", "CAD generation failed"),
+                "traceback": result.get("traceback", ""),
+                "product_name": opportunity.get("title", "unknown"),
+            }}
 
         validation = result.get("validation", {})
         metrics = validation.get("metrics", {})
@@ -330,31 +334,130 @@ Do NOT include explanation — just the JSON object.
         return cad_engine.generate_from_library(product_type, params)
 
     async def _design_from_llm_code(self, opportunity: dict) -> dict:
+        """Generate CadQuery code via LLM with retry on failure."""
         from . import cad_engine
-
-        prompt = f"""Write CadQuery Python code to model this product for 3D printing:
-
-PRODUCT: {json.dumps(opportunity, indent=2)}
-
-RULES (follow exactly):
-1. `import cadquery as cq` and `import math` only.
-2. Assign the final solid to `result`.
-3. All dimensions in mm.  Min wall: 1.5mm.  Max: 256x256x256mm.
-4. Use ONLY: .box(), .cylinder(), .circle(), .rect(), .extrude(), .cut(),
-   .union(), .fillet(), .chamfer(), .translate(), .rotate(), .workplane(), .center()
-5. 30-60 lines.  No lofts, sweeps, or splines — they break the kernel.
-6. Add dimension comments.
-
-Return ONLY Python code.  No markdown.  No explanation.
-"""
-        code = await self.llm(prompt, task_type="product_design", max_tokens=2000)
-        code = code.strip()
-        if code.startswith("```"):
-            lines = code.split("\n")
-            code = "\n".join(lines[1:(-1 if lines[-1].strip() == "```" else len(lines))])
+        import re
 
         name = opportunity.get("title", "custom")[:40]
-        return cad_engine.generate_from_code(code, name)
+        description = opportunity.get("description", name)
+
+        system_prompt = (
+            "You are a CadQuery code generator. Output ONLY valid Python code. "
+            "No explanation. No thinking. No markdown. Just code that runs."
+        )
+
+        base_prompt = f"""Write CadQuery code for: {description}
+
+import cadquery as cq
+import math
+
+# Build the model using .box(), .cylinder(), .union(), .cut(), .translate(), .rotate()
+# All dimensions in mm. Max 256x256x256mm. Min wall 1.5mm.
+# Assign final solid to `result`.
+# Keep under 40 lines. Use try/except around .fillet() calls.
+"""
+        last_error = None
+        for attempt in range(2):
+            if attempt == 0:
+                prompt = base_prompt
+            else:
+                prompt = f"""Fix this CadQuery code.  Error: {last_error}
+
+{description}
+
+Write corrected code.  Simpler geometry.  Must compile.  Assign to `result`.
+"""
+            raw = await self.llm(prompt, task_type="json_task", max_tokens=4000)
+            code = self._extract_python(raw)
+
+            if not code:
+                last_error = "Could not extract valid Python code from LLM response"
+                continue
+
+            result = cad_engine.generate_from_code(code, name)
+            if result.get("success"):
+                return result
+
+            last_error = result.get("error", "Unknown error")
+            log.warning("[CTO] Code gen attempt %d failed: %s", attempt + 1, last_error)
+
+        return {"success": False, "error": f"Code generation failed after 2 attempts: {last_error}"}
+
+    @staticmethod
+    def _extract_python(raw: str) -> str:
+        """Extract clean Python code from LLM response — handles thinking, markdown, truncation."""
+        import re
+        text = raw.strip()
+
+        # 1. Try markdown code block
+        m = re.search(r'```(?:python)?\s*\n(.*?)```', text, re.DOTALL)
+        if m:
+            code = m.group(1).strip()
+        else:
+            # 2. If no closing ```, grab everything after the opening ```
+            m = re.search(r'```(?:python)?\s*\n(.*)', text, re.DOTALL)
+            if m:
+                code = m.group(1).strip()
+            else:
+                # 3. Find Python code by looking for import/cq lines
+                lines = text.split("\n")
+                code_lines = []
+                in_code = False
+                for line in lines:
+                    stripped = line.strip()
+                    if not in_code:
+                        if stripped.startswith(("import ", "from ", "# ")) and (
+                            "cadquery" in stripped or "cq" in stripped or
+                            "math" in stripped or in_code
+                        ):
+                            in_code = True
+                        elif stripped.startswith(("body", "base", "result")) and "=" in stripped:
+                            in_code = True
+                    if in_code:
+                        # Stop on prose lines
+                        if stripped.startswith(("*", "Note:", "This ", "The ", "I ", "---")):
+                            break
+                        code_lines.append(line)
+                code = "\n".join(code_lines).strip()
+
+        if not code:
+            return ""
+
+        # 4. Fix truncated last line (incomplete string, open paren, etc.)
+        lines = code.split("\n")
+        while lines:
+            last = lines[-1].strip()
+            if not last:
+                lines.pop()
+                continue
+            # Detect truncation: unmatched parens, quotes, trailing comma/operator
+            open_p = last.count("(") - last.count(")")
+            open_b = last.count("[") - last.count("]")
+            if open_p > 0 or open_b > 0 or last.endswith((",", "+", "-", "*", "\\", "(")):
+                lines.pop()
+                continue
+            try:
+                compile(last, "<check>", "exec")
+                break  # line compiles — keep it
+            except SyntaxError:
+                lines.pop()
+                continue
+
+        code = "\n".join(lines).strip()
+
+        # 5. Ensure imports
+        if "import cadquery" not in code:
+            code = "import cadquery as cq\nimport math\n\n" + code
+
+        # 6. Ensure result assignment exists
+        if "result" not in code.split("\n")[-1] if code else True:
+            # Try to find the main solid variable
+            for var in ("body", "base", "model", "solid", "part", "car", "obj"):
+                if re.search(rf'^{var}\s*=', code, re.MULTILINE):
+                    code += f"\nresult = {var}"
+                    break
+
+        return code
 
     async def _generate_cad(self, task: dict) -> dict:
         from . import cad_engine

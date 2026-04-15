@@ -68,7 +68,8 @@ button.primary:hover { background: #33e0ff; }
 <div id="header">
     <h1>Atlas Swarm — 3D Viewer</h1>
     <select id="stl-select"><option value="">Loading models...</option></select>
-    <button class="primary" id="btn-generate">Generate New</button>
+    <input type="text" id="design-input" placeholder="Describe anything — toy car, guitar hook, vase..." style="width:280px; background:#1a1a2e; color:#ddd; border:1px solid #333; padding:6px 12px; border-radius:6px; font-size:13px;">
+    <button class="primary" id="btn-generate">Generate</button>
     <button id="btn-download">Download STL</button>
 </div>
 
@@ -241,26 +242,35 @@ document.getElementById('stl-select').addEventListener('change', (e) => {
     if (e.target.value) loadSTL(e.target.value, e.target.value);
 });
 
+document.getElementById('design-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-generate').click();
+});
+
 document.getElementById('btn-generate').addEventListener('click', async () => {
-    const type = prompt('Product type (phone_stand, tablet_holder, cable_clip, desk_organizer, headphone_hook):', 'phone_stand');
-    if (!type) return;
+    const input = document.getElementById('design-input');
+    const desc = input.value.trim();
+    if (!desc) { input.focus(); input.placeholder = 'Type something — car, vase, bracket...'; return; }
     document.getElementById('loading').style.display = 'block';
-    document.getElementById('loading').textContent = `Generating ${type}...`;
+    document.getElementById('loading').textContent = `Generating "${desc}"... (LLM designing CAD)`;
+    input.disabled = true;
     try {
-        const res = await fetch(`/design?product_type=${encodeURIComponent(type)}&params={}`, { method: 'POST' });
+        const res = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
         const data = await res.json();
-        if (data.success) {
+        if (data.success || data.stl_file) {
             await refreshModels();
-            // Load the newly generated one (it'll be first in the list)
             const sel = document.getElementById('stl-select');
-            if (sel.value) loadSTL(sel.value, data.stl_filename);
+            if (sel.value) loadSTL(sel.value, data.stl_filename || data.stl_file);
+            input.value = '';
         } else {
-            alert('Generation failed: ' + (data.error || 'Unknown error'));
+            alert('Generation failed: ' + (data.error || JSON.stringify(data).slice(0, 300)));
             document.getElementById('loading').style.display = 'none';
         }
     } catch (err) {
         alert('Error: ' + err.message);
         document.getElementById('loading').style.display = 'none';
+    } finally {
+        input.disabled = false;
+        input.focus();
     }
 });
 
