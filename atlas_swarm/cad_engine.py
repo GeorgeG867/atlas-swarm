@@ -203,9 +203,32 @@ def _strip_fillets(code: str) -> str:
     import re
     code = re.sub(r'\.fillet\([^)]*\)', '', code)
     code = re.sub(r'\.chamfer\([^)]*\)', '', code)
-    # Also remove standalone try/except blocks that only wrapped fillets
     code = re.sub(r'try:\s*\n\s*\n\s*except[^\n]*\n\s*pass', '', code)
     return code
+
+
+def _auto_scale_to_print_bed(solid: cq.Workplane, target_max: float = 200.0) -> cq.Workplane:
+    """Scale the solid uniformly so its longest dimension fits the target size.
+
+    LLMs often generate real-world dimensions (e.g., 4m tennis table).  This
+    scales them to a 3D-printable size (default 200mm max so there's margin).
+    """
+    try:
+        bb = solid.val().BoundingBox()
+        max_dim = max(bb.xlen, bb.ylen, bb.zlen)
+        if max_dim <= target_max:
+            return solid  # already fits
+
+        scale_factor = target_max / max_dim
+        log.info("[CAD] Auto-scaling: max_dim=%.0fmm -> %.0fmm (factor %.3f)",
+                 max_dim, target_max, scale_factor)
+
+        # Apply uniform scale via CadQuery's workplane scale
+        scaled = solid.val().scale(scale_factor)
+        return cq.Workplane("XY").add(scaled)
+    except Exception as e:
+        log.warning("[CAD] Auto-scale failed: %s", e)
+        return solid
 
 
 def generate_from_code(cadquery_code: str, product_name: str = "custom") -> dict:
@@ -249,6 +272,9 @@ def generate_from_code(cadquery_code: str, product_name: str = "custom") -> dict
             if not isinstance(solid, cq.Workplane):
                 last_err = f"result must be cq.Workplane, got {type(solid).__name__}"
                 continue
+
+            # Auto-scale if oversized (LLM often uses real-world dimensions)
+            solid = _auto_scale_to_print_bed(solid)
 
             validation = validate_geometry(solid)
 

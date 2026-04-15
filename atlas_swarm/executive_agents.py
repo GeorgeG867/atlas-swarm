@@ -356,7 +356,17 @@ import math
 ```
 
 YOUR TASK: Modify the example above to create "{description}" instead.
-Keep the same coding style.  Change dimensions, features, and shape to match.
+
+CRITICAL DIMENSION RULES:
+- The FINAL object must fit in a 200x200x200mm box (3D printer bed).
+- This is a MINIATURE/TOY model, NOT real-world size.
+- If the real object is large (furniture, vehicles, buildings), scale down.
+  Example: real table = 1500mm long -> miniature = 150mm long.
+  Example: real car = 4000mm long -> toy car = 100mm long.
+- Keep ALL dimensions in the 5-200mm range.
+- Minimum wall thickness: 1.5mm.
+
+Keep the example's coding style.  Change dimensions, features, and shape.
 The variable `result` must hold the final solid.
 Output ONLY the modified Python code.
 """

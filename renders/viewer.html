@@ -324,17 +324,17 @@ function loadSTL(url, name) {
         currentProductName = name;
 
         fitCamera(mesh);
-        d.getElementById('loading').style.display = 'none';
+        document.getElementById('loading').style.display = 'none';
     }, undefined, (err) => {
         document.getElementById('loading').textContent = 'Error: ' + err.message;
     });
 }
 
 // ── Populate dropdown ──
-async function refreshModels() {
+async function refreshModels(preferFile) {
     const sel = document.getElementById('stl-select');
     try {
-        const data = await (await fetch('/cad/renders')).json();
+        const data = await (await fetch('/cad/renders?_=' + Date.now())).json();
         // Prefer GLB (textured), fall back to STL
         const models = data.filter(f => f.name.endsWith('.glb') || f.name.endsWith('.stl'));
         // Dedupe: if a GLB exists for a product, skip its STL
@@ -352,7 +352,12 @@ async function refreshModels() {
             o.textContent = `${f.name.replace(/_\d+\.(stl|glb)/, '')}${tag} (${f.size_kb}KB)`;
             sel.appendChild(o);
         });
-        loadModel(sel.value, deduped[0].name);
+        // If a specific file was requested, select it — otherwise use newest
+        if (preferFile) {
+            const match = [...sel.options].find(o => o.value.includes(preferFile));
+            if (match) sel.value = match.value;
+        }
+        loadModel(sel.value, sel.value.split('/').pop());
     } catch {
         sel.innerHTML = '<option value="/renders/stabilizer_v1.stl">stabilizer_v1</option>';
         loadSTL('/renders/stabilizer_v1.stl', 'stabilizer');
@@ -383,36 +388,36 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     input.disabled = true;
     try {
         // 1. Generate CadQuery STL (fast, for 3D printing)
-        ld.textContent = `[1/2] Generating printable STL...`;
+        ld.textContent = `Designing "${desc}"...`;
         const stlRes = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
         const stlData = await stlRes.json();
 
-        // 2. Generate textured 3D model via Meshy/Tripo (if API key set)
-        const name = desc.replace(/\s+/g, '_').substring(0, 30);
-        ld.textContent = `[2/2] Generating textured 3D model (Meshy)...`;
-        const meshRes = await fetch(`/mesh3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(name)}`, { method: 'POST' });
-        const meshData = await meshRes.json();
-
-        await refreshModels();
-        const sel = document.getElementById('stl-select');
-
-        // Prefer GLB if generated, otherwise load STL
-        if (meshData.success && meshData.glb_filename) {
-            const glbOpt = [...sel.options].find(o => o.value.includes(meshData.glb_filename));
-            if (glbOpt) { sel.value = glbOpt.value; loadGLB(glbOpt.value, meshData.glb_filename); }
-            else if (sel.value) loadModel(sel.value, sel.value);
-        } else if (stlData.success || stlData.stl_file) {
-            if (sel.value) loadModel(sel.value, stlData.stl_filename || stlData.stl_file);
-        } else {
-            alert('Generation: ' + (meshData.error || stlData.error || 'unknown error'));
+        // Validate that STL generation produced a file
+        const stlFile = stlData.stl_file || stlData.stl_filename;
+        if (!stlFile) {
+            const errMsg = stlData.error || JSON.stringify(stlData).slice(0, 200);
+            alert(`Design failed: ${errMsg}`);
             ld.style.display = 'none';
+            return;
         }
-        input.value = '';
 
-        // Show hint if no 3D provider
-        if (!meshData.success && meshData.hint) {
-            console.log('Meshy hint:', meshData.hint);
+        // 2. Optional: Text-to-3D via Meshy (only if API key configured)
+        let glbFile = null;
+        const providerCheck = await fetch('/mesh3d/providers').then(r => r.json()).catch(() => ({configured: false}));
+        if (providerCheck.configured) {
+            ld.textContent = `Generating textured 3D model (Meshy)...`;
+            const safeName = desc.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+            try {
+                const meshRes = await fetch(`/mesh3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`, { method: 'POST' });
+                const meshData = await meshRes.json();
+                if (meshData.success) glbFile = meshData.glb_filename;
+            } catch {}
         }
+
+        // Refresh dropdown and select the SPECIFIC file we just generated
+        ld.textContent = `Loading ${glbFile || stlFile}...`;
+        await refreshModels(glbFile || stlFile);
+        input.value = '';
     } catch (err) {
         alert('Error: ' + err.message);
         ld.style.display = 'none';
