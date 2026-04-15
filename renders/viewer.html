@@ -106,7 +106,7 @@ button.render-btn:hover { background: #a78bfa; }
 </div>
 
 <div id="render-overlay">
-    <div class="status" id="render-status">Generating photorealistic render with Flux.1...</div>
+    <div class="status" id="render-status"></div>
     <img id="render-image" src="" alt="Product Render" style="display:none;">
     <button class="close-btn" onclick="document.getElementById('render-overlay').classList.remove('visible')">Close</button>
 </div>
@@ -349,7 +349,8 @@ async function refreshModels(preferFile) {
             const o = document.createElement('option');
             o.value = `/renders/${f.name}`;
             const tag = f.name.endsWith('.glb') ? ' [3D]' : ' [CAD]';
-            o.textContent = `${f.name.replace(/_\d+\.(stl|glb)/, '')}${tag} (${f.size_kb}KB)`;
+            const pretty = f.name.replace(/_\d{9,}\.(stl|glb|step|obj)$/i, '');
+            o.textContent = `${pretty}${tag} (${f.size_kb}KB)`;
             sel.appendChild(o);
         });
         // If a specific file was requested, select it — otherwise use newest
@@ -391,17 +392,28 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
         // No API keys, runs entirely on MM1 MPS
         const safeName = desc.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
 
-        ld.textContent = `[1/2] Generating product image (Flux.1, ~40s)...`;
+        // Live ticker so the user sees actual progress instead of a fake ETA
+        const genStart = Date.now();
+        const genTicker = setInterval(() => {
+            const s = Math.round((Date.now() - genStart) / 1000);
+            ld.textContent = `Generating "${desc}"... ${s}s`;
+        }, 1000);
+        ld.textContent = `Generating "${desc}"... 0s`;
 
-        const t2Res = await fetch(
-            `/text-to-3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`,
-            { method: 'POST' }
-        );
-        const t2Data = await t2Res.json();
+        let t2Data;
+        try {
+            const t2Res = await fetch(
+                `/text-to-3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`,
+                { method: 'POST' }
+            );
+            t2Data = await t2Res.json();
+        } finally {
+            clearInterval(genTicker);
+        }
 
         let targetFile = null;
         if (t2Data.success && t2Data.glb_filename) {
-            ld.textContent = `Loaded GLB (${t2Data.vertices} verts, ${t2Data.total_time_s}s)`;
+            ld.textContent = `GLB ready (${t2Data.vertices} verts, ${t2Data.total_time_s}s)`;
             targetFile = t2Data.glb_filename;
         } else {
             // Fall back to CadQuery STL if local pipeline fails
@@ -427,21 +439,50 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 });
 
-// ── Render Photo (Flux.1) ──
+// ── Derive a clean product name from any filename (stl/glb/step/png) ──
+function extractProductName(filename) {
+    if (!filename) return '';
+    return filename
+        .replace(/\.[a-z0-9]+$/i, '')       // strip extension
+        .replace(/_\d{9,}$/, '')             // strip trailing _<timestamp>
+        .replace(/_/g, ' ')                  // underscores → spaces
+        .trim();
+}
+
+// ── Render Photo — uses whatever the server says, not hardcoded text ──
 document.getElementById('btn-render').addEventListener('click', async () => {
-    const name = currentProductName.replace(/_\d+\.stl/, '').replace(/_/g, ' ') || 'product';
+    const name = extractProductName(currentProductName) || 'product';
     const overlay = document.getElementById('render-overlay');
     const status = document.getElementById('render-status');
     const img = document.getElementById('render-image');
     overlay.classList.add('visible');
     img.style.display = 'none';
-    status.textContent = `Generating photorealistic render of "${name}" with Flux.1... (~2 min)`;
     status.style.display = 'block';
+
+    const start = Date.now();
+    let ticker = null;
+    const updateElapsed = () => {
+        const s = Math.round((Date.now() - start) / 1000);
+        status.textContent = `Rendering "${name}"... ${s}s`;
+    };
+    updateElapsed();
+    ticker = setInterval(updateElapsed, 1000);
+
     try {
         const matBtn = document.querySelector('.mat-btn.active');
-        const matName = matBtn ? matBtn.textContent.trim() : 'white PLA plastic';
-        const res = await fetch(`/visualize?product_name=${encodeURIComponent(name)}&description=3D+printed+${encodeURIComponent(name)}&material=${encodeURIComponent(matName)}`, { method: 'POST' });
+        const matName = matBtn ? matBtn.textContent.trim() : 'white plastic';
+        const res = await fetch(
+            `/visualize?product_name=${encodeURIComponent(name)}` +
+            `&description=${encodeURIComponent(name)}` +
+            `&material=${encodeURIComponent(matName)}`,
+            { method: 'POST' }
+        );
         const data = await res.json();
+        clearInterval(ticker);
+
+        const elapsed = data.generation_time_s || Math.round((Date.now() - start) / 1000);
+        const model = data.model || 'unknown';
+
         if (data.image_base64) {
             img.src = `data:image/png;base64,${data.image_base64}`;
             img.style.display = 'block';
@@ -452,9 +493,10 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             img.style.display = 'block';
             status.style.display = 'none';
         } else {
-            status.textContent = 'Render returned no image. Model may still be loading on first run.';
+            status.textContent = `No image returned (model=${model}, ${elapsed}s)`;
         }
     } catch (err) {
+        if (ticker) clearInterval(ticker);
         status.textContent = 'Render error: ' + err.message;
     }
 });
