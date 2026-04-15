@@ -126,6 +126,7 @@ button.render-btn:hover { background: #a78bfa; }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // ── Scene ──
@@ -235,15 +236,76 @@ const material = new THREE.MeshPhysicalMaterial({
 // ── State ──
 let currentMesh = null;
 let currentProductName = '';
-const loader = new STLLoader();
+const stlLoader = new STLLoader();
+const gltfLoader = new GLTFLoader();
+
+function clearModel() {
+    if (currentMesh) {
+        scene.remove(currentMesh);
+        currentMesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+                if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                else child.material.dispose();
+            }
+        });
+        currentMesh = null;
+    }
+}
+
+function fitCamera(obj) {
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    camera.position.set(maxDim * 1.3, maxDim * 0.8, maxDim * 1.3);
+    controls.target.set(0, size.y / 3, 0);
+    controls.update();
+
+    const d = document;
+    d.getElementById('info-dims').textContent = `${size.x.toFixed(0)}x${size.y.toFixed(0)}x${size.z.toFixed(0)}mm`;
+    const vol = (size.x * size.y * size.z / 1e6).toFixed(1);
+    d.getElementById('info-vol').textContent = `${vol}cm\u00B3`;
+    d.getElementById('info-weight').textContent = `${(vol * 1.24).toFixed(0)}g`;
+    const fits = size.x <= 256 && size.y <= 256 && size.z <= 256;
+    d.getElementById('info-print').textContent = fits ? 'Fits' : 'TOO BIG';
+    d.getElementById('info-print').className = 'info-value ' + (fits ? 'good' : 'bad');
+}
+
+function loadGLB(url, name) {
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('loading').textContent = 'Loading textured model...';
+    clearModel();
+
+    gltfLoader.load(url, (gltf) => {
+        const model = gltf.scene;
+        // Center it
+        const box = new THREE.Box3().setFromObject(model);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        model.position.sub(center);
+        model.position.y = -box.min.y + center.y;
+        // Enable shadows
+        model.traverse(child => {
+            if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+        });
+        scene.add(model);
+        currentMesh = model;
+        currentProductName = name;
+        fitCamera(model);
+        document.getElementById('loading').style.display = 'none';
+    }, undefined, (err) => {
+        document.getElementById('loading').textContent = 'GLB error — falling back to STL';
+        // Try STL fallback
+        const stlUrl = url.replace('.glb', '.stl');
+        loadSTL(stlUrl, name);
+    });
+}
 
 function loadSTL(url, name) {
     document.getElementById('loading').style.display = 'block';
     document.getElementById('loading').textContent = 'Loading model...';
+    clearModel();
 
-    if (currentMesh) { scene.remove(currentMesh); currentMesh.geometry.dispose(); }
-
-    loader.load(url, (geometry) => {
+    stlLoader.load(url, (geometry) => {
         geometry.computeVertexNormals();
         geometry.computeBoundingBox();
 
@@ -261,21 +323,7 @@ function loadSTL(url, name) {
         currentMesh = mesh;
         currentProductName = name;
 
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const maxDim = Math.max(size.x, size.y, size.z);
-        camera.position.set(maxDim * 1.3, maxDim * 0.8, maxDim * 1.3);
-        controls.target.set(0, size.y / 3, 0);
-        controls.update();
-
-        const d = document;
-        d.getElementById('info-dims').textContent = `${size.x.toFixed(0)}x${size.y.toFixed(0)}x${size.z.toFixed(0)}mm`;
-        const vol = (size.x * size.y * size.z / 1e6).toFixed(1);
-        d.getElementById('info-vol').textContent = `${vol}cm\u00B3`;
-        d.getElementById('info-weight').textContent = `${(vol * 1.24).toFixed(0)}g`;
-        const fits = size.x <= 256 && size.y <= 256 && size.z <= 256;
-        d.getElementById('info-print').textContent = fits ? 'Fits' : 'TOO BIG';
-        d.getElementById('info-print').className = 'info-value ' + (fits ? 'good' : 'bad');
+        fitCamera(mesh);
         d.getElementById('loading').style.display = 'none';
     }, undefined, (err) => {
         document.getElementById('loading').textContent = 'Error: ' + err.message;
@@ -287,25 +335,38 @@ async function refreshModels() {
     const sel = document.getElementById('stl-select');
     try {
         const data = await (await fetch('/cad/renders')).json();
-        const stls = data.filter(f => f.name.endsWith('.stl'));
+        // Prefer GLB (textured), fall back to STL
+        const models = data.filter(f => f.name.endsWith('.glb') || f.name.endsWith('.stl'));
+        // Dedupe: if a GLB exists for a product, skip its STL
+        const glbNames = new Set(models.filter(f => f.name.endsWith('.glb')).map(f => f.name.replace('.glb', '')));
+        const deduped = models.filter(f => {
+            if (f.name.endsWith('.stl') && glbNames.has(f.name.replace('.stl', ''))) return false;
+            return true;
+        });
         sel.innerHTML = '';
-        if (!stls.length) { sel.innerHTML = '<option value="">No models</option>'; return; }
-        stls.forEach(f => {
+        if (!deduped.length) { sel.innerHTML = '<option value="">No models</option>'; return; }
+        deduped.forEach(f => {
             const o = document.createElement('option');
             o.value = `/renders/${f.name}`;
-            o.textContent = `${f.name.replace(/_\d+\.stl/, '')} (${f.size_kb}KB)`;
+            const tag = f.name.endsWith('.glb') ? ' [3D]' : ' [CAD]';
+            o.textContent = `${f.name.replace(/_\d+\.(stl|glb)/, '')}${tag} (${f.size_kb}KB)`;
             sel.appendChild(o);
         });
-        loadSTL(sel.value, stls[0].name);
+        loadModel(sel.value, deduped[0].name);
     } catch {
         sel.innerHTML = '<option value="/renders/stabilizer_v1.stl">stabilizer_v1</option>';
         loadSTL('/renders/stabilizer_v1.stl', 'stabilizer');
     }
 }
 
+function loadModel(url, name) {
+    if (url.endsWith('.glb')) loadGLB(url, name);
+    else loadSTL(url, name);
+}
+
 // ── Events ──
 document.getElementById('stl-select').addEventListener('change', e => {
-    if (e.target.value) loadSTL(e.target.value, e.target.value);
+    if (e.target.value) loadModel(e.target.value, e.target.value);
 });
 
 document.getElementById('design-input').addEventListener('keydown', e => {
@@ -321,16 +382,36 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     ld.textContent = `Designing "${desc}"...`;
     input.disabled = true;
     try {
-        const res = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.success || data.stl_file) {
-            await refreshModels();
-            const sel = document.getElementById('stl-select');
-            if (sel.value) loadSTL(sel.value, data.stl_filename || data.stl_file);
-            input.value = '';
+        // 1. Generate CadQuery STL (fast, for 3D printing)
+        ld.textContent = `[1/2] Generating printable STL...`;
+        const stlRes = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
+        const stlData = await stlRes.json();
+
+        // 2. Generate textured 3D model via Meshy/Tripo (if API key set)
+        const name = desc.replace(/\s+/g, '_').substring(0, 30);
+        ld.textContent = `[2/2] Generating textured 3D model (Meshy)...`;
+        const meshRes = await fetch(`/mesh3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(name)}`, { method: 'POST' });
+        const meshData = await meshRes.json();
+
+        await refreshModels();
+        const sel = document.getElementById('stl-select');
+
+        // Prefer GLB if generated, otherwise load STL
+        if (meshData.success && meshData.glb_filename) {
+            const glbOpt = [...sel.options].find(o => o.value.includes(meshData.glb_filename));
+            if (glbOpt) { sel.value = glbOpt.value; loadGLB(glbOpt.value, meshData.glb_filename); }
+            else if (sel.value) loadModel(sel.value, sel.value);
+        } else if (stlData.success || stlData.stl_file) {
+            if (sel.value) loadModel(sel.value, stlData.stl_filename || stlData.stl_file);
         } else {
-            alert('Failed: ' + (data.error || JSON.stringify(data).slice(0, 200)));
+            alert('Generation: ' + (meshData.error || stlData.error || 'unknown error'));
             ld.style.display = 'none';
+        }
+        input.value = '';
+
+        // Show hint if no 3D provider
+        if (!meshData.success && meshData.hint) {
+            console.log('Meshy hint:', meshData.hint);
         }
     } catch (err) {
         alert('Error: ' + err.message);

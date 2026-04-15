@@ -227,12 +227,12 @@ def create_app():
 
     @app.get("/kie/scan")
     async def kie_scan(vertical: str = "medical device", limit: int = 10):
-        opps = await orch.kie.get_opportunities(limit=limit)
-        return {"opportunities": opps, "count": len(opps)}
+        opps = await orch.kie.scan_opportunities(verticals=[vertical], limit_per_vertical=limit)
+        return await orch.kie.score_with_aim(opps, top_n=limit)
 
     @app.get("/kie/report")
     async def kie_report():
-        return await orch.kie.run_pipeline()
+        return await orch.kie.weekly_pipeline_report()
 
     @app.get("/bridge/health")
     async def bh():
@@ -368,48 +368,90 @@ def create_app():
 
     @app.get("/cad/renders")
     async def cad_renders():
-        """List all generated STL/STEP files on disk."""
+        """List all generated files — STL, STEP, GLB, PNG."""
         from . import cad_engine
-        return cad_engine.list_renders()
+        renders = cad_engine.list_renders()
+        # Also include GLB files
+        glb_dir = Path.home() / "Projects/atlas-swarm/renders"
+        for f in sorted(glb_dir.glob("*.glb"), key=lambda p: p.stat().st_mtime, reverse=True):
+            renders.append({
+                "name": f.name, "type": "glb",
+                "size_kb": round(f.stat().st_size / 1024, 1),
+                "path": str(f),
+            })
+        return renders
 
+    # ── Text-to-3D (Meshy/Tripo) — textured GLB models ──────────────
 
-    @app.get("/debug/bridge")
-    async def debug_bridge():
-        import httpx, socket, asyncio, subprocess, os
-        results = {}
-        # Test 0: network interfaces and routing
+    @app.post("/mesh3d")
+    async def mesh3d(description: str, product_name: str = "", provider: str = "auto"):
+        """Generate a textured 3D model (GLB) via Meshy.ai or Tripo3D.
+
+        This produces a VISUAL model for the viewer, not an engineering STL.
+        Example: POST /mesh3d?description=toy race car&product_name=race_car
+        """
+        from . import mesh_gen
+        name = product_name or description.replace(" ", "_")[:30]
+        return await mesh_gen.generate_3d_model(description, name, provider)
+
+    @app.get("/mesh3d/providers")
+    async def mesh3d_providers():
+        """Check which text-to-3D providers are configured."""
+        from . import mesh_gen
+        providers = mesh_gen.available_providers()
+        return {
+            "providers": providers,
+            "configured": len(providers) > 0,
+            "hint": "Set MESHY_API_KEY or TRIPO_API_KEY env var" if not providers else None,
+        }
+
+    # ── Full product pipeline: STL + GLB + Photo ─────────────────────
+
+    @app.post("/design/full")
+    async def design_full(description: str):
+        """Generate ALL three outputs for a product:
+        1. CadQuery STL (for 3D printing)
+        2. Meshy/Tripo GLB (for viewer with textures)
+        3. Flux.1 PNG (for marketing photo)
+
+        Runs STL synchronously, GLB + Photo in background.
+        """
+        from . import cad_engine, mesh_gen
+        from .visualizer import generate_product_render
+
+        text = description.strip()
+        if not text:
+            return {"success": False, "error": "Provide description"}
+
+        name = "".join(c if c.isalnum() or c in "-_ " else "" for c in text)[:30].strip().replace(" ", "_")
+        results = {"description": text, "outputs": {}}
+
+        # 1. CadQuery STL (fast — local)
+        stl_result = await orch.dispatch({
+            "type": "design_product",
+            "opportunity": {"title": text, "description": text},
+        })
+        stl_inner = stl_result.get("result")
+        results["outputs"]["stl"] = stl_inner or {"error": stl_result.get("error", "STL gen failed")}
+
+        # 2. Text-to-3D GLB (async — cloud API)
+        glb_result = await mesh_gen.generate_3d_model(text, name)
+        results["outputs"]["glb"] = glb_result
+
+        # 3. Flux.1 product photo (async — local GPU)
         try:
-            r = subprocess.run(["route", "-n", "get", "192.168.1.204"], capture_output=True, text=True, timeout=5)
-            results["route"] = r.stdout.strip()[:300]
+            photo = await generate_product_render({"product_name": name, "product_description": text})
+            results["outputs"]["photo"] = {
+                "success": True,
+                "image_path": photo.get("image_path"),
+                "model": photo.get("model"),
+            }
         except Exception as e:
-            results["route"] = str(e)
-        try:
-            r = subprocess.run(["curl", "-s", "--connect-timeout", "3", "http://192.168.1.204:8000/health"], capture_output=True, text=True, timeout=10)
-            results["curl_test"] = r.stdout[:200]
-        except Exception as e:
-            results["curl_test"] = str(e)
-        results["env_path"] = os.environ.get("PATH", "?")
-        results["pid"] = os.getpid()
-        # Test 1: socket
-        try:
-            s = socket.create_connection(("192.168.1.204", 8000), timeout=5)
-            results["socket"] = "connected"
-            s.close()
-        except Exception as e:
-            results["socket"] = str(e)
-        # Test 2: httpx one-shot
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as c:
-                r = await c.get("http://192.168.1.204:8000/health")
-                results["httpx_oneshot"] = f"status={r.status_code}"
-        except Exception as e:
-            results["httpx_oneshot"] = str(e)
-        # Test 3: bridge singleton
-        try:
-            h = await get_bridge().health()
-            results["bridge_singleton"] = h
-        except Exception as e:
-            results["bridge_singleton"] = str(e)
+            results["outputs"]["photo"] = {"success": False, "error": str(e)}
+
+        results["success"] = any(
+            r.get("success") for r in results["outputs"].values() if isinstance(r, dict)
+        )
         return results
 
     return app
@@ -418,4 +460,4 @@ def create_app():
 if __name__ == "__main__":
     import uvicorn
     app = create_app()
-    uvicorn.run(app, host="0.0.0.0", port=8100, loop="asyncio")
+    uvicorn.run(app, host="0.0.0.0", port=8100)
