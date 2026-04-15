@@ -123,25 +123,22 @@ async def generate_product_render(product_brief: dict) -> dict:
 
     Returns image_path, image_base64, prompt_used, model, generation_time_s.
     """
+    from . import config
+
     product_name = product_brief.get("product_name", "Product")
     description = product_brief.get("product_description",
                   product_brief.get("description", ""))[:300]
     material = product_brief.get("material",
                product_brief.get("bill_of_materials", "white plastic"))
 
-    # Build the prompt directly — more reliable than asking the LLM
-    subject = f"{product_name}"
+    subject = product_name
     if description and description.lower() != product_name.lower():
         subject = f"{product_name}, {description}"
 
-    sd_prompt = (
-        f"A professional product photograph of {subject}, "
-        f"made of {material}, "
-        f"white studio background, soft gradient, "
-        f"3-point studio lighting, 45 degree angle, "
-        f"sharp focus, high detail, 4K, photorealistic, "
-        f"product photography, commercial, clean, no text"
-    )
+    # Prompt template from templates/cad_prompts.yaml — no hardcoded text
+    template = config.get("cad_prompts.prompts.product_photo.template",
+                          "A product photograph of {subject}, {material}")
+    sd_prompt = template.format(subject=subject, material=material)
 
     log.info("[VIS] Generating render for '%s' — prompt: %s", product_name, sd_prompt[:80])
     start = time.monotonic()

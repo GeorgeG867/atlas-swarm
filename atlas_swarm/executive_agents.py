@@ -346,47 +346,27 @@ Do NOT include explanation — just the JSON object.
         example = cad_examples.get_example(category)
         log.info("[CTO] Category '%s' for: %s", category, description)
 
-        base_prompt = f"""Adapt this CadQuery EXAMPLE to make: {description}
-
-EXAMPLE ({category}):
-```
-import cadquery as cq
-import math
-{example}
-```
-
-YOUR TASK: Modify the example above to create "{description}" instead.
-
-CRITICAL DIMENSION RULES:
-- The FINAL object must fit in a 200x200x200mm box (3D printer bed).
-- This is a MINIATURE/TOY model, NOT real-world size.
-- If the real object is large (furniture, vehicles, buildings), scale down.
-  Example: real table = 1500mm long -> miniature = 150mm long.
-  Example: real car = 4000mm long -> toy car = 100mm long.
-- Keep ALL dimensions in the 5-200mm range.
-- Minimum wall thickness: 1.5mm.
-
-Keep the example's coding style.  Change dimensions, features, and shape.
-The variable `result` must hold the final solid.
-Output ONLY the modified Python code.
-"""
+        from . import config
+        printer = config.printer_constraints()
+        fmt_kwargs = dict(
+            description=description,
+            category=category,
+            example=example,
+            max_x=printer.get("max_x_mm", 256),
+            max_y=printer.get("max_y_mm", 256),
+            max_z=printer.get("max_z_mm", 256),
+            target_max=printer.get("target_max_mm", 200),
+            min_wall=printer.get("min_wall_mm", 1.5),
+        )
+        base_prompt = config.prompt_template("cad_design", "user").format(**fmt_kwargs)
         last_error = None
         for attempt in range(2):
             if attempt == 0:
                 prompt = base_prompt
             else:
-                prompt = f"""The previous code failed: {last_error}
-
-Fix it.  Here is a WORKING example for reference:
-```
-import cadquery as cq
-{example}
-```
-
-Adapt it for: {description}
-Simpler geometry.  Must compile.  Assign to `result`.
-Output ONLY Python code.
-"""
+                prompt = config.prompt_template("cad_design", "retry").format(
+                    **{**fmt_kwargs, "last_error": last_error}
+                )
             raw = await self.llm(prompt, task_type="json_task", max_tokens=4000)
             code = self._extract_python(raw)
 

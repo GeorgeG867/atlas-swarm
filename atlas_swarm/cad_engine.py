@@ -23,8 +23,11 @@ RENDERS_DIR = Path(os.environ.get(
 ))
 RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
-MAX_PRINT_MM = (256, 256, 256)
-MIN_WALL_MM = 1.2
+def _print_bed() -> tuple[int, int, int]:
+    """Read printer dims from config — no hardcoded constants."""
+    from . import config
+    p = config.printer_constraints()
+    return (p.get("max_x_mm", 256), p.get("max_y_mm", 256), p.get("max_z_mm", 256))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -48,12 +51,9 @@ def validate_geometry(solid: cq.Workplane) -> dict:
             "z": round(bb.zlen, 1),
         }
 
-        # Print-volume check
-        for axis, val, limit in [
-            ("x", dims["x"], MAX_PRINT_MM[0]),
-            ("y", dims["y"], MAX_PRINT_MM[1]),
-            ("z", dims["z"], MAX_PRINT_MM[2]),
-        ]:
+        # Print-volume check — limits come from YAML config
+        bed = _print_bed()
+        for axis, val, limit in [("x", dims["x"], bed[0]), ("y", dims["y"], bed[1]), ("z", dims["z"], bed[2])]:
             if val > limit:
                 issues.append(f"{axis}={val}mm exceeds {limit}mm print volume")
 
@@ -89,8 +89,7 @@ def validate_geometry(solid: cq.Workplane) -> dict:
                 "volume_cm3": round(volume_cm3, 2),
                 "estimated_weight_pla_g": round(weight_pla_g, 1),
                 "fits_print_bed": all(
-                    dims[a] <= MAX_PRINT_MM[i]
-                    for i, a in enumerate(["x", "y", "z"])
+                    dims[a] <= bed[i] for i, a in enumerate(["x", "y", "z"])
                 ),
             },
         }
@@ -207,23 +206,22 @@ def _strip_fillets(code: str) -> str:
     return code
 
 
-def _auto_scale_to_print_bed(solid: cq.Workplane, target_max: float = 200.0) -> cq.Workplane:
-    """Scale the solid uniformly so its longest dimension fits the target size.
+def _auto_scale_to_print_bed(solid: cq.Workplane) -> cq.Workplane:
+    """Scale the solid uniformly so its longest dimension fits the target_max_mm.
 
-    LLMs often generate real-world dimensions (e.g., 4m tennis table).  This
-    scales them to a 3D-printable size (default 200mm max so there's margin).
+    Reads target_max_mm from templates/cad_prompts.yaml (no hardcoded constants).
     """
+    from . import config
+    target_max = float(config.printer_constraints().get("target_max_mm", 200))
     try:
         bb = solid.val().BoundingBox()
         max_dim = max(bb.xlen, bb.ylen, bb.zlen)
         if max_dim <= target_max:
-            return solid  # already fits
+            return solid
 
         scale_factor = target_max / max_dim
         log.info("[CAD] Auto-scaling: max_dim=%.0fmm -> %.0fmm (factor %.3f)",
                  max_dim, target_max, scale_factor)
-
-        # Apply uniform scale via CadQuery's workplane scale
         scaled = solid.val().scale(scale_factor)
         return cq.Workplane("XY").add(scaled)
     except Exception as e:

@@ -1,0 +1,54 @@
+# Atlas Swarm — LLM prompt templates and runtime constants.
+# All prompt text and numeric constants live here — no hardcoding in Python.
+
+# Printer/geometry constraints (used by both prompt rendering and auto-scale)
+printer:
+  max_x_mm: 256
+  max_y_mm: 256
+  max_z_mm: 256
+  target_max_mm: 200          # auto-scale target (leaves margin from max)
+  min_wall_mm: 1.5
+
+# Prompt templates — use {placeholders} that Python's str.format() fills in
+prompts:
+  cad_design:
+    user: |
+      Adapt this CadQuery EXAMPLE to make: {description}
+
+      EXAMPLE ({category}):
+      ```
+      import cadquery as cq
+      import math
+      {example}
+      ```
+
+      YOUR TASK: Modify the example above to create "{description}" instead.
+
+      DIMENSION RULES:
+      - The FINAL object must fit in a {max_x}x{max_y}x{max_z}mm box (3D printer bed).
+      - This is a MINIATURE/TOY model, NOT real-world size.
+      - If the real object is large (furniture, vehicles, buildings), scale down.
+      - Keep ALL dimensions in the 5-{target_max}mm range.
+      - Minimum wall thickness: {min_wall}mm.
+
+      Keep the example's coding style.  Change dimensions, features, and shape.
+      The variable `result` must hold the final solid.
+      Output ONLY the modified Python code.
+
+    retry: |
+      The previous code failed: {last_error}
+
+      Fix it.  Here is a WORKING example for reference:
+      ```
+      import cadquery as cq
+      {example}
+      ```
+
+      Adapt it for: {description}
+      Simpler geometry.  Must compile.  Assign to `result`.
+      All dimensions in the 5-{target_max}mm range.
+      Output ONLY Python code.
+
+  product_photo:
+    template: |
+      A professional product photograph of {subject}, made of {material}, white studio background, soft gradient, 3-point studio lighting, 45 degree angle, sharp focus, high detail, 4K, photorealistic, product photography, commercial, clean, no text

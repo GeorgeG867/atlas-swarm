@@ -387,36 +387,36 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     ld.textContent = `Designing "${desc}"...`;
     input.disabled = true;
     try {
-        // 1. Generate CadQuery STL (fast, for 3D printing)
-        ld.textContent = `Designing "${desc}"...`;
-        const stlRes = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
-        const stlData = await stlRes.json();
+        // Local text-to-3D pipeline: Flux.1 image -> TripoSR GLB
+        // No API keys, runs entirely on MM1 MPS
+        const safeName = desc.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
 
-        // Validate that STL generation produced a file
-        const stlFile = stlData.stl_file || stlData.stl_filename;
-        if (!stlFile) {
-            const errMsg = stlData.error || JSON.stringify(stlData).slice(0, 200);
-            alert(`Design failed: ${errMsg}`);
-            ld.style.display = 'none';
-            return;
+        ld.textContent = `[1/2] Generating product image (Flux.1, ~40s)...`;
+
+        const t2Res = await fetch(
+            `/text-to-3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`,
+            { method: 'POST' }
+        );
+        const t2Data = await t2Res.json();
+
+        let targetFile = null;
+        if (t2Data.success && t2Data.glb_filename) {
+            ld.textContent = `Loaded GLB (${t2Data.vertices} verts, ${t2Data.total_time_s}s)`;
+            targetFile = t2Data.glb_filename;
+        } else {
+            // Fall back to CadQuery STL if local pipeline fails
+            ld.textContent = `Falling back to CadQuery STL...`;
+            const stlRes = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
+            const stlData = await stlRes.json();
+            targetFile = stlData.stl_file || stlData.stl_filename;
+            if (!targetFile) {
+                alert(`Generation failed: ${t2Data.error || stlData.error || 'unknown'}`);
+                ld.style.display = 'none';
+                return;
+            }
         }
 
-        // 2. Optional: Text-to-3D via Meshy (only if API key configured)
-        let glbFile = null;
-        const providerCheck = await fetch('/mesh3d/providers').then(r => r.json()).catch(() => ({configured: false}));
-        if (providerCheck.configured) {
-            ld.textContent = `Generating textured 3D model (Meshy)...`;
-            const safeName = desc.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
-            try {
-                const meshRes = await fetch(`/mesh3d?description=${encodeURIComponent(desc)}&product_name=${encodeURIComponent(safeName)}`, { method: 'POST' });
-                const meshData = await meshRes.json();
-                if (meshData.success) glbFile = meshData.glb_filename;
-            } catch {}
-        }
-
-        // Refresh dropdown and select the SPECIFIC file we just generated
-        ld.textContent = `Loading ${glbFile || stlFile}...`;
-        await refreshModels(glbFile || stlFile);
+        await refreshModels(targetFile);
         input.value = '';
     } catch (err) {
         alert('Error: ' + err.message);

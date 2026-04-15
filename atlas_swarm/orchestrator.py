@@ -397,13 +397,24 @@ def create_app():
     @app.get("/mesh3d/providers")
     async def mesh3d_providers():
         """Check which text-to-3D providers are configured."""
-        from . import mesh_gen
-        providers = mesh_gen.available_providers()
+        from . import mesh_gen, local_text_to_3d
+        providers = list(mesh_gen.available_providers())
+        if local_text_to_3d.is_available():
+            providers.append("local-flux+triposr")
         return {
             "providers": providers,
             "configured": len(providers) > 0,
-            "hint": "Set MESHY_API_KEY or TRIPO_API_KEY env var" if not providers else None,
+            "local_available": local_text_to_3d.is_available(),
         }
+
+    @app.post("/text-to-3d")
+    async def text_to_3d(description: str, product_name: str = ""):
+        """Full LOCAL pipeline: text -> Flux.1 image -> TripoSR GLB.
+
+        No API keys required. Runs entirely on MM1 MPS. ~60-90s total.
+        """
+        from . import local_text_to_3d
+        return await local_text_to_3d.text_to_3d_local(description, product_name)
 
     # ── Full product pipeline: STL + GLB + Photo ─────────────────────
 
