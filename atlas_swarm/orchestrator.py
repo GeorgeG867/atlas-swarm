@@ -517,6 +517,50 @@ def create_app():
         )
         return results
 
+
+    # -- Video Animation (SVD-XT) -----------------------------------------
+
+    @app.post("/animate")
+    async def animate_image(
+        image_url: str = "",
+        image_path: str = "",
+        frames: int = 25,
+        fps: int = 10,
+        motion_bucket_id: int = 127,
+    ):
+        """Animate a still image into a short video using SVD-XT.
+
+        Accepts image_url (downloaded via curl) or image_path (local file).
+        Returns MP4 video URL.  ~120-300s on M4 Pro.
+        """
+        from . import video
+        return await video.animate(
+            image_url=image_url or None,
+            image_path=image_path or None,
+            frames=frames,
+            fps=fps,
+            motion_bucket_id=motion_bucket_id,
+        )
+
+    @app.get("/renders/animations/{filename}")
+    async def get_animation(filename: str):
+        filepath = Path.home() / "Projects/atlas-swarm/renders/animations" / filename
+        if not filepath.exists():
+            return {"error": "Not found"}
+        return FileResponse(filepath, media_type="video/mp4")
+
+    @app.get("/animations")
+    async def list_animations():
+        anim_dir = Path.home() / "Projects/atlas-swarm/renders/animations"
+        if not anim_dir.exists():
+            return []
+        files = sorted(anim_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [
+            {"name": f.name, "size_kb": round(f.stat().st_size / 1024, 1),
+             "url": f"http://192.168.1.179:8100/renders/animations/{f.name}"}
+            for f in files[:30]
+        ]
+
     return app
 
 
