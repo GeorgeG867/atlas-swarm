@@ -1,0 +1,202 @@
+# Atlas Swarm — CadQuery Few-Shot Examples by Category
+# LLM adapts these working examples when generating novel products.
+# Add new categories here, not in Python code.
+
+vehicle:
+  keywords: [car, truck, bus, vehicle, van, jeep, suv, wagon, race, motorcycle, bike]
+  example: |
+    # Toy car — chassis + cabin + 4 wheels + bumpers + headlights
+    body = cq.Workplane("XY").box(80, 35, 12)
+    cabin = cq.Workplane("XY").box(35, 30, 16).translate((5, 0, 14))
+    body = body.union(cabin)
+
+    hood_cut = cq.Workplane("XY").box(20, 32, 20).translate((30, 0, 14))
+    body = body.cut(hood_cut)
+    hood = cq.Workplane("XY").box(20, 30, 8).translate((30, 0, 10))
+    body = body.union(hood)
+
+    for x_pos in [22, -22]:
+        for y_sign in [1, -1]:
+            wheel = (cq.Workplane("XZ")
+                     .circle(8).extrude(5)
+                     .translate((x_pos, y_sign * 20, -2)))
+            body = body.union(wheel)
+
+    front = cq.Workplane("XY").box(4, 30, 8).translate((42, 0, 0))
+    rear = cq.Workplane("XY").box(4, 30, 8).translate((-42, 0, 0))
+    body = body.union(front).union(rear)
+
+    for y in [10, -10]:
+        hl = cq.Workplane("YZ").circle(3).extrude(3).translate((41, y, 4))
+        body = body.cut(hl)
+
+    try:
+        body = body.edges("|Z").fillet(2)
+    except Exception:
+        pass
+
+    result = body
+
+container:
+  keywords: [vase, cup, bowl, pot, jar, mug, bottle, planter, bucket, container, bin, can]
+  example: |
+    # Vase — revolved profile with waist and flared rim
+    outer_r_base = 30
+    outer_r_mid = 22
+    outer_r_top = 32
+    height = 120
+    wall = 3
+
+    pts = [
+        (0, 0),
+        (outer_r_base, 0),
+        (outer_r_mid, height * 0.4),
+        (outer_r_top, height),
+        (outer_r_top - wall, height),
+        (outer_r_mid - wall, height * 0.4),
+        (outer_r_base - wall, 0 + wall),
+        (0, wall),
+    ]
+
+    body = (cq.Workplane("XZ")
+            .polyline(pts).close()
+            .revolve(360, (0, 0, 0), (0, 1, 0)))
+
+    result = body
+
+furniture:
+  keywords: [shelf, table, chair, bench, stool, rack, hook, mount, bracket, hanger]
+  example: |
+    # Wall shelf bracket — L-shape with diagonal rib + screw holes
+    arm_l = 120
+    arm_h = 80
+    thick = 5
+    width = 30
+
+    mount = cq.Workplane("XY").box(width, thick, arm_h)
+    arm = cq.Workplane("XY").box(width, arm_l, thick).translate((0, arm_l/2 - thick/2, -arm_h/2 + thick/2))
+    body = mount.union(arm)
+
+    rib = cq.Workplane("XY").box(width - 8, thick, arm_h * 0.7)
+    rib = rib.rotate((0,0,0), (1,0,0), 45)
+    rib = rib.translate((0, 25, -15))
+    body = body.union(rib)
+
+    for z in [arm_h/2 - 15, -arm_h/2 + 15]:
+        hole = cq.Workplane("XY").circle(2.5).extrude(thick + 2).translate((0, 0, z))
+        body = body.cut(hole)
+
+    try:
+        body = body.edges().fillet(1.5)
+    except Exception:
+        pass
+
+    result = body
+
+tool:
+  keywords: [wrench, tool, clamp, grip, plier, screwdriver, hammer, lever, handle, knob, gear, pulley]
+  example: |
+    # Open-end wrench — handle + jaw opening + hanging hole
+    handle_l = 120
+    handle_w = 18
+    handle_t = 5
+    jaw_opening = 16
+    jaw_depth = 25
+
+    handle = cq.Workplane("XY").box(handle_l, handle_w, handle_t)
+
+    jaw_block = cq.Workplane("XY").box(jaw_depth, handle_w + 10, handle_t).translate((handle_l/2 + jaw_depth/2 - 5, 0, 0))
+    body = handle.union(jaw_block)
+
+    jaw_cut = cq.Workplane("XY").box(jaw_depth + 2, jaw_opening, handle_t + 2).translate((handle_l/2 + jaw_depth/2 - 2, 0, 0))
+    body = body.cut(jaw_cut)
+
+    hang_hole = cq.Workplane("XY").circle(4).extrude(handle_t + 2).translate((-handle_l/2 + 10, 0, -1))
+    body = body.cut(hang_hole)
+
+    try:
+        body = body.edges().fillet(1.2)
+    except Exception:
+        pass
+
+    result = body
+
+accessory:
+  keywords: [ring, pendant, keychain, bookmark, tag, badge, ornament, decoration, charm, token, coin]
+  example: |
+    # Heart-shaped bookmark clip
+    body_l = 80
+    body_w = 25
+    body_t = 2
+
+    body = cq.Workplane("XY").box(body_l, body_w, body_t)
+
+    heart_r = 5
+    c1 = cq.Workplane("XY").circle(heart_r).extrude(body_t + 2).translate((body_l/2 - 15, heart_r * 0.5, -1))
+    c2 = cq.Workplane("XY").circle(heart_r).extrude(body_t + 2).translate((body_l/2 - 15, -heart_r * 0.5, -1))
+    tri = cq.Workplane("XY").box(heart_r * 2, heart_r * 1.5, body_t + 2).translate((body_l/2 - 15, 0, -1))
+    body = body.cut(c1).cut(c2).cut(tri)
+
+    clip = cq.Workplane("XY").box(15, body_w, body_t).translate((-body_l/2 - 5, 0, -body_t))
+    body = body.union(clip)
+
+    try:
+        body = body.edges("|Z").fillet(1)
+    except Exception:
+        pass
+
+    result = body
+
+electronics:
+  keywords: [case, enclosure, box, housing, cover, shell, raspberry, arduino, pcb, board]
+  example: |
+    # Electronics enclosure — ventilation, USB port, mounting standoffs
+    inner_l = 85
+    inner_w = 56
+    inner_h = 30
+    wall = 2.5
+
+    outer = cq.Workplane("XY").box(inner_l + 2*wall, inner_w + 2*wall, inner_h + wall)
+    inner = cq.Workplane("XY").box(inner_l, inner_w, inner_h).translate((0, 0, wall))
+    body = outer.cut(inner)
+
+    usb = cq.Workplane("YZ").box(12, 6, wall + 4).translate((inner_l/2 + wall, 0, wall + 8))
+    body = body.cut(usb)
+
+    for i in range(5):
+        slot = cq.Workplane("XZ").box(15, 2, wall + 2).translate((0, inner_w/2 + wall, wall + 6 + i * 4))
+        body = body.cut(slot)
+
+    for x_s in [1, -1]:
+        for y_s in [1, -1]:
+            post = cq.Workplane("XY").circle(3).extrude(8).translate((x_s * (inner_l/2 - 6), y_s * (inner_w/2 - 6), wall))
+            screw = cq.Workplane("XY").circle(1.25).extrude(9).translate((x_s * (inner_l/2 - 6), y_s * (inner_w/2 - 6), wall))
+            body = body.union(post).cut(screw)
+
+    try:
+        body = body.edges("|Z").fillet(2)
+    except Exception:
+        pass
+
+    result = body
+
+general:
+  keywords: []
+  example: |
+    # Generic object — base + feature + details
+    base = cq.Workplane("XY").box(60, 40, 5)
+    feature = cq.Workplane("XY").box(30, 20, 25).translate((0, 0, 15))
+    body = base.union(feature)
+
+    cyl = cq.Workplane("XY").circle(10).extrude(30).translate((0, 0, 5))
+    body = body.union(cyl)
+
+    hole = cq.Workplane("XY").circle(5).extrude(35).translate((0, 0, 3))
+    body = body.cut(hole)
+
+    try:
+        body = body.edges().fillet(1.5)
+    except Exception:
+        pass
+
+    result = body

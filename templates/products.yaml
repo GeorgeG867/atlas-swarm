@@ -1,0 +1,96 @@
+# Atlas Swarm — Parametric Product Catalog
+# Add new products here, not in Python code.
+
+phone_stand:
+  name: Phone Stand
+  description: Minimal angle phone stand — desk viewing, one-piece print, no supports
+  default_material: PLA
+  default_infill: 20
+  estimated_time_min: 90
+  estimated_material_g: 42
+  keywords: [phone, stand, holder, dock, cradle, mobile]
+  defaults:
+    width: 85.0
+    base_depth: 75.0
+    base_thick: 5.0
+    back_height: 100.0
+    back_angle: 72.0
+    back_thick: 3.5
+    lip_height: 18.0
+    lip_thick: 4.0
+    cable_w: 14.0
+    cable_h: 5.0
+    fillet_r: 1.5
+
+tablet_holder:
+  name: Tablet Holder
+  description: Wide-base tablet/iPad holder with charging slot
+  default_material: PETG
+  default_infill: 25
+  estimated_time_min: 160
+  estimated_material_g: 95
+  keywords: [tablet, ipad, holder, stand]
+  defaults:
+    width: 130.0
+    base_depth: 95.0
+    base_thick: 6.0
+    back_height: 160.0
+    back_angle: 75.0
+    back_thick: 4.0
+    lip_height: 22.0
+    lip_thick: 5.0
+    cable_w: 18.0
+    cable_h: 6.0
+    fillet_r: 2.0
+
+cable_clip:
+  name: Cable Management Clip
+  description: Snap-fit cable clip with screw/adhesive mount — pack of 6 SKU
+  default_material: PETG
+  default_infill: 100
+  estimated_time_min: 12
+  estimated_material_g: 4
+  keywords: [cable, clip, cord, management, wire]
+  defaults:
+    inner_d: 6.0
+    wall: 2.5
+    length: 15.0
+    mount_w: 20.0
+    mount_d: 3.0
+    screw_d: 3.5
+    gap_w: 3.0
+
+desk_organizer:
+  name: Desk Organizer
+  description: Multi-compartment desk tray with pen holder section
+  default_material: PLA
+  default_infill: 20
+  estimated_time_min: 270
+  estimated_material_g: 130
+  keywords: [desk, organizer, tray, pen, office, storage]
+  defaults:
+    length: 180.0
+    width: 80.0
+    height: 45.0
+    wall: 2.5
+    dividers: 2
+    pen_slots: 3
+    pen_d: 12.0
+    fillet_r: 2.0
+
+headphone_hook:
+  name: Under-Desk Headphone Hook
+  description: Clamp-mount headphone hanger — no screws, friction fit
+  default_material: PETG
+  default_infill: 40
+  estimated_time_min: 120
+  estimated_material_g: 55
+  keywords: [headphone, hook, hanger, clamp]
+  defaults:
+    arm_length: 80.0
+    arm_width: 30.0
+    arm_thick: 5.0
+    clamp_depth: 25.0
+    clamp_gap: 30.0
+    wall: 4.0
+    fillet_r: 3.0

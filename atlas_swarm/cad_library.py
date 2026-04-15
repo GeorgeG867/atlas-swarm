@@ -296,61 +296,61 @@ def headphone_hook(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Product Catalog — maps product keys to functions + metadata
+# Product Catalog — metadata from YAML, geometry functions from this module
 # ═══════════════════════════════════════════════════════════════════════
 
-PRODUCTS = {
-    "phone_stand": {
-        "func": phone_stand,
-        "name": "Phone Stand",
-        "description": "Minimal angle phone stand — desk viewing, one-piece print, no supports",
-        "default_material": "PLA",
-        "default_infill": 20,
-        "estimated_time_min": 90,
-        "estimated_material_g": 42,
-        "keywords": ["phone", "stand", "holder", "dock", "cradle", "mobile"],
-    },
-    "tablet_holder": {
-        "func": tablet_holder,
-        "name": "Tablet Holder",
-        "description": "Wide-base tablet/iPad holder with charging slot",
-        "default_material": "PETG",
-        "default_infill": 25,
-        "estimated_time_min": 160,
-        "estimated_material_g": 95,
-        "keywords": ["tablet", "ipad", "holder", "stand"],
-    },
-    "cable_clip": {
-        "func": cable_clip,
-        "name": "Cable Management Clip",
-        "description": "Snap-fit cable clip with screw/adhesive mount — pack of 6 SKU",
-        "default_material": "PETG",
-        "default_infill": 100,
-        "estimated_time_min": 12,
-        "estimated_material_g": 4,
-        "keywords": ["cable", "clip", "cord", "management", "organizer", "wire"],
-    },
-    "desk_organizer": {
-        "func": desk_organizer,
-        "name": "Desk Organizer",
-        "description": "Multi-compartment desk tray with pen holder section",
-        "default_material": "PLA",
-        "default_infill": 20,
-        "estimated_time_min": 270,
-        "estimated_material_g": 130,
-        "keywords": ["desk", "organizer", "tray", "pen", "holder", "office", "storage"],
-    },
-    "headphone_hook": {
-        "func": headphone_hook,
-        "name": "Under-Desk Headphone Hook",
-        "description": "Clamp-mount headphone hanger — no screws, friction fit",
-        "default_material": "PETG",
-        "default_infill": 40,
-        "estimated_time_min": 120,
-        "estimated_material_g": 55,
-        "keywords": ["headphone", "hook", "hanger", "desk", "mount", "clamp"],
-    },
+# Geometry functions keyed by product type name
+_GEOMETRY_FUNCS = {
+    "phone_stand": phone_stand,
+    "tablet_holder": tablet_holder,
+    "cable_clip": cable_clip,
+    "desk_organizer": desk_organizer,
+    "headphone_hook": headphone_hook,
 }
+
+
+def _load_products() -> dict:
+    """Load product catalog: YAML metadata + Python geometry functions."""
+    import os
+    from pathlib import Path
+    import yaml
+
+    yaml_path = Path(os.environ.get(
+        "SWARM_TEMPLATES",
+        Path(__file__).resolve().parent.parent / "templates",
+    )) / "products.yaml"
+
+    catalog = {}
+    if yaml_path.exists():
+        raw = yaml.safe_load(yaml_path.read_text()) or {}
+        for key, meta in raw.items():
+            func = _GEOMETRY_FUNCS.get(key)
+            if func is None:
+                continue
+            catalog[key] = {
+                "func": func,
+                "name": meta.get("name", key),
+                "description": meta.get("description", ""),
+                "default_material": meta.get("default_material", "PLA"),
+                "default_infill": meta.get("default_infill", 20),
+                "estimated_time_min": meta.get("estimated_time_min", 60),
+                "estimated_material_g": meta.get("estimated_material_g", 50),
+                "keywords": meta.get("keywords", []),
+            }
+    else:
+        # Fallback: register functions with minimal metadata
+        for key, func in _GEOMETRY_FUNCS.items():
+            catalog[key] = {
+                "func": func, "name": key.replace("_", " ").title(),
+                "description": "", "default_material": "PLA",
+                "default_infill": 20, "estimated_time_min": 60,
+                "estimated_material_g": 50, "keywords": key.split("_"),
+            }
+
+    return catalog
+
+
+PRODUCTS = _load_products()
 
 
 def get_function_params(product_type: str) -> dict:

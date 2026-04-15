@@ -3,97 +3,116 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Atlas Swarm — 3D Product Viewer</title>
+<title>Atlas Swarm — 3D Product Studio</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0f0f1a; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+body { background: #0a0a14; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
 
 #header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    background: rgba(15,15,26,0.95); padding: 10px 20px;
-    display: flex; align-items: center; gap: 16px;
-    border-bottom: 1px solid #2a2a40;
+    background: rgba(10,10,20,0.95); padding: 8px 16px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    border-bottom: 1px solid #1e1e30;
 }
-#header h1 { font-size: 16px; color: #00d4ff; white-space: nowrap; }
+#header h1 { font-size: 14px; color: #00d4ff; white-space: nowrap; }
 
-select, button {
-    background: #1a1a2e; color: #ddd; border: 1px solid #333;
-    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
+select, input[type="text"], button {
+    background: #12122a; color: #ccc; border: 1px solid #2a2a40;
+    padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer;
 }
+input[type="text"] { cursor: text; }
 select:hover, button:hover { border-color: #00d4ff; }
 button.primary { background: #00d4ff; color: #000; font-weight: 600; border: none; }
 button.primary:hover { background: #33e0ff; }
+button.render-btn { background: #8b5cf6; color: #fff; font-weight: 600; border: none; }
+button.render-btn:hover { background: #a78bfa; }
 
 #info-bar {
-    position: fixed; top: 48px; left: 0; right: 0; z-index: 99;
-    background: rgba(15,15,26,0.9); padding: 6px 20px;
-    font-size: 12px; color: #888; border-bottom: 1px solid #222;
-    display: flex; gap: 20px;
+    position: fixed; top: 42px; left: 0; right: 0; z-index: 99;
+    background: rgba(10,10,20,0.9); padding: 4px 16px;
+    font-size: 11px; color: #666; border-bottom: 1px solid #1a1a28;
+    display: flex; gap: 16px;
 }
-.info-item { display: flex; gap: 4px; }
-.info-label { color: #666; }
-.info-value { color: #aaa; }
+.info-item { display: flex; gap: 3px; }
+.info-value { color: #999; }
 .info-value.good { color: #4ade80; }
-.info-value.warn { color: #fbbf24; }
 .info-value.bad { color: #f87171; }
 
 #viewer { width: 100vw; height: 100vh; }
 
-#controls {
-    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: rgba(15,15,26,0.85); padding: 8px 16px; border-radius: 8px;
-    border: 1px solid #2a2a40; font-size: 12px; color: #666; text-align: center;
+#side-panel {
+    position: fixed; right: 12px; top: 70px; z-index: 100;
+    background: rgba(10,10,20,0.95); padding: 10px; border-radius: 8px;
+    border: 1px solid #1e1e30; font-size: 11px; width: 150px;
 }
-
-#loading {
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
-    font-size: 18px; color: #00d4ff; display: none;
-}
-
-#material-panel {
-    position: fixed; right: 16px; top: 80px; z-index: 100;
-    background: rgba(15,15,26,0.95); padding: 12px; border-radius: 8px;
-    border: 1px solid #2a2a40; font-size: 12px; width: 160px;
-}
-#material-panel h3 { font-size: 13px; color: #888; margin-bottom: 8px; }
+#side-panel h3 { font-size: 12px; color: #666; margin-bottom: 6px; }
 .mat-btn {
-    display: block; width: 100%; text-align: left; padding: 6px 8px;
-    margin-bottom: 4px; border-radius: 4px; font-size: 12px;
+    display: block; width: 100%; text-align: left; padding: 4px 6px;
+    margin-bottom: 3px; border-radius: 4px; font-size: 11px;
 }
 .mat-btn.active { border-color: #00d4ff; color: #00d4ff; }
+
+#render-overlay {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 200; background: rgba(0,0,0,0.85);
+    justify-content: center; align-items: center; flex-direction: column;
+}
+#render-overlay.visible { display: flex; }
+#render-overlay img { max-width: 80vw; max-height: 70vh; border-radius: 8px; border: 2px solid #333; }
+#render-overlay .close-btn { margin-top: 12px; }
+#render-overlay .status { color: #00d4ff; font-size: 16px; margin: 20px; }
+
+#controls {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(10,10,20,0.7); padding: 6px 14px; border-radius: 6px;
+    border: 1px solid #1e1e30; font-size: 11px; color: #444;
+}
+#loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 16px; color: #00d4ff; display: none;
+}
 </style>
 </head>
 <body>
 
 <div id="header">
-    <h1>Atlas Swarm — 3D Viewer</h1>
-    <select id="stl-select"><option value="">Loading models...</option></select>
-    <input type="text" id="design-input" placeholder="Describe anything — toy car, guitar hook, vase..." style="width:280px; background:#1a1a2e; color:#ddd; border:1px solid #333; padding:6px 12px; border-radius:6px; font-size:13px;">
+    <h1>Atlas 3D Studio</h1>
+    <select id="stl-select"><option value="">Loading...</option></select>
+    <input type="text" id="design-input" placeholder="Describe anything..." style="width:220px;">
     <button class="primary" id="btn-generate">Generate</button>
+    <button class="render-btn" id="btn-render">Render Photo</button>
     <button id="btn-download">Download STL</button>
 </div>
 
 <div id="info-bar">
-    <div class="info-item"><span class="info-label">Dims:</span><span class="info-value" id="info-dims">—</span></div>
-    <div class="info-item"><span class="info-label">Volume:</span><span class="info-value" id="info-vol">—</span></div>
-    <div class="info-item"><span class="info-label">Weight:</span><span class="info-value" id="info-weight">—</span></div>
-    <div class="info-item"><span class="info-label">Print:</span><span class="info-value" id="info-print">—</span></div>
+    <div class="info-item"><span>Dims:</span><span class="info-value" id="info-dims">-</span></div>
+    <div class="info-item"><span>Vol:</span><span class="info-value" id="info-vol">-</span></div>
+    <div class="info-item"><span>Wt:</span><span class="info-value" id="info-weight">-</span></div>
+    <div class="info-item"><span>Bed:</span><span class="info-value" id="info-print">-</span></div>
 </div>
 
 <div id="viewer"></div>
 
-<div id="material-panel">
+<div id="side-panel">
     <h3>Material</h3>
-    <button class="mat-btn active" data-color="0xf0f0f0" data-rough="0.35" data-metal="0.05">White PLA</button>
-    <button class="mat-btn" data-color="0x2a2a2a" data-rough="0.25" data-metal="0.02">Black PETG</button>
-    <button class="mat-btn" data-color="0xb8b8b8" data-rough="0.15" data-metal="0.6">Silver Metal</button>
-    <button class="mat-btn" data-color="0xd4a574" data-rough="0.55" data-metal="0.0">Wood PLA</button>
-    <button class="mat-btn" data-color="0xe8d5c4" data-rough="0.6" data-metal="0.0">Beige Matte</button>
-    <button class="mat-btn" data-color="0x3b82f6" data-rough="0.3" data-metal="0.05">Blue PLA</button>
+    <button class="mat-btn active" data-color="0xf5f5f0" data-rough="0.25" data-metal="0.0" data-clear="0.4">White PLA</button>
+    <button class="mat-btn" data-color="0x1a1a1a" data-rough="0.2" data-metal="0.0" data-clear="0.6">Black PETG</button>
+    <button class="mat-btn" data-color="0xc0c0c0" data-rough="0.1" data-metal="0.85" data-clear="0.0">Brushed Metal</button>
+    <button class="mat-btn" data-color="0xc9956b" data-rough="0.55" data-metal="0.0" data-clear="0.0">Wood PLA</button>
+    <button class="mat-btn" data-color="0xe8ddd0" data-rough="0.5" data-metal="0.0" data-clear="0.0">Matte Beige</button>
+    <button class="mat-btn" data-color="0x2563eb" data-rough="0.22" data-metal="0.0" data-clear="0.5">Blue PLA</button>
+    <button class="mat-btn" data-color="0xdc2626" data-rough="0.22" data-metal="0.0" data-clear="0.5">Red PLA</button>
+    <button class="mat-btn" data-color="0xf0f0f0" data-rough="0.0" data-metal="0.0" data-clear="1.0">Clear Resin</button>
 </div>
 
-<div id="controls">Left-drag: rotate | Right-drag: pan | Scroll: zoom | Double-click: reset</div>
-<div id="loading">Loading 3D model...</div>
+<div id="render-overlay">
+    <div class="status" id="render-status">Generating photorealistic render with Flux.1...</div>
+    <img id="render-image" src="" alt="Product Render" style="display:none;">
+    <button class="close-btn" onclick="document.getElementById('render-overlay').classList.remove('visible')">Close</button>
+</div>
+
+<div id="controls">Drag: rotate | Right-drag: pan | Scroll: zoom | Dbl-click: reset</div>
+<div id="loading"></div>
 
 <script type="importmap">
 {
@@ -107,65 +126,120 @@ button.primary:hover { background: #33e0ff; }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // ── Scene ──
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0f0f1a);
+scene.background = new THREE.Color(0x0a0a14);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
-camera.position.set(200, 150, 250);
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 5000);
+camera.position.set(180, 120, 220);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.4;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.getElementById('viewer').appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.target.set(0, 20, 0);
+controls.target.set(0, 15, 0);
 
-// ── Lighting — 3-point studio ──
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
-keyLight.position.set(200, 350, 250);
+// ── Environment Map (procedural studio HDRI) ──
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+
+function createStudioEnv() {
+    const size = 256;
+    const data = new Float32Array(size * size * 4);
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            const ny = y / size;
+            // Gradient: warm top → cool bottom with bright band at horizon
+            const horizon = Math.exp(-Math.pow((ny - 0.5) * 6, 2)) * 0.8;
+            const sky = Math.max(0, 1.0 - ny) * 0.15;
+            const ground = Math.max(0, ny - 0.5) * 0.08;
+            data[i]     = 0.12 + horizon * 0.9 + sky * 0.3 + ground * 0.1;  // R
+            data[i + 1] = 0.12 + horizon * 0.85 + sky * 0.35 + ground * 0.1; // G
+            data[i + 2] = 0.15 + horizon * 0.95 + sky * 0.5 + ground * 0.15; // B
+            data[i + 3] = 1.0;
+        }
+    }
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.needsUpdate = true;
+    const envMap = pmremGenerator.fromEquirectangular(tex).texture;
+    tex.dispose();
+    return envMap;
+}
+
+const envMap = createStudioEnv();
+scene.environment = envMap;
+
+// ── Lighting — cinematic 4-point ──
+const keyLight = new THREE.DirectionalLight(0xfff5e8, 2.0);
+keyLight.position.set(150, 300, 200);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.far = 800;
+keyLight.shadow.bias = -0.001;
 scene.add(keyLight);
 
-const fillLight = new THREE.DirectionalLight(0x8888cc, 0.6);
-fillLight.position.set(-250, 200, -100);
+const fillLight = new THREE.DirectionalLight(0xc8d8ff, 0.7);
+fillLight.position.set(-200, 150, -80);
 scene.add(fillLight);
 
-const rimLight = new THREE.DirectionalLight(0xffffff, 0.9);
-rimLight.position.set(0, 50, -350);
+const rimLight = new THREE.DirectionalLight(0xffffff, 1.0);
+rimLight.position.set(0, 80, -300);
 scene.add(rimLight);
 
-scene.add(new THREE.AmbientLight(0x303050, 0.5));
+const bottomFill = new THREE.DirectionalLight(0x404080, 0.3);
+bottomFill.position.set(0, -100, 0);
+scene.add(bottomFill);
 
-// ── Ground ──
+scene.add(new THREE.AmbientLight(0x202030, 0.3));
+
+// ── Ground — reflective studio floor ──
 const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(800, 800),
-    new THREE.MeshStandardMaterial({ color: 0x151520, roughness: 0.9 })
+    new THREE.PlaneGeometry(1000, 1000),
+    new THREE.MeshStandardMaterial({
+        color: 0x0d0d18, roughness: 0.6, metalness: 0.1, envMap,
+    })
 );
 ground.rotation.x = -Math.PI / 2;
-ground.position.y = -1;
+ground.position.y = -0.5;
 ground.receiveShadow = true;
 scene.add(ground);
 
-const grid = new THREE.GridHelper(500, 25, 0x222240, 0x1a1a30);
+const grid = new THREE.GridHelper(400, 20, 0x181830, 0x101020);
+grid.position.y = -0.4;
 scene.add(grid);
+
+// ── Material — PBR Physical Material with clearcoat ──
+const material = new THREE.MeshPhysicalMaterial({
+    color: 0xf5f5f0,
+    roughness: 0.25,
+    metalness: 0.0,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.15,
+    envMap: envMap,
+    envMapIntensity: 1.2,
+});
 
 // ── State ──
 let currentMesh = null;
+let currentProductName = '';
 const loader = new STLLoader();
-const material = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.35, metalness: 0.05 });
 
-// ── Load STL ──
 function loadSTL(url, name) {
     document.getElementById('loading').style.display = 'block';
+    document.getElementById('loading').textContent = 'Loading model...';
 
     if (currentMesh) { scene.remove(currentMesh); currentMesh.geometry.dispose(); }
 
@@ -185,73 +259,66 @@ function loadSTL(url, name) {
         mesh.position.y = -box.min.y;
         scene.add(mesh);
         currentMesh = mesh;
+        currentProductName = name;
 
-        // Fit camera
         const size = new THREE.Vector3();
         box.getSize(size);
         const maxDim = Math.max(size.x, size.y, size.z);
-        camera.position.set(maxDim * 1.4, maxDim * 0.9, maxDim * 1.4);
+        camera.position.set(maxDim * 1.3, maxDim * 0.8, maxDim * 1.3);
         controls.target.set(0, size.y / 3, 0);
         controls.update();
 
-        // Update info bar
         const d = document;
-        d.getElementById('info-dims').textContent = `${size.x.toFixed(0)} x ${size.y.toFixed(0)} x ${size.z.toFixed(0)} mm`;
+        d.getElementById('info-dims').textContent = `${size.x.toFixed(0)}x${size.y.toFixed(0)}x${size.z.toFixed(0)}mm`;
         const vol = (size.x * size.y * size.z / 1e6).toFixed(1);
-        d.getElementById('info-vol').textContent = `~${vol} cm³`;
-        const wt = (vol * 1.24).toFixed(0);
-        d.getElementById('info-weight').textContent = `~${wt}g PLA`;
-        d.getElementById('info-print').textContent = size.x <= 256 && size.y <= 256 && size.z <= 256 ? 'Fits bed' : 'TOO LARGE';
-        d.getElementById('info-print').className = 'info-value ' + (size.x <= 256 && size.y <= 256 && size.z <= 256 ? 'good' : 'bad');
-
+        d.getElementById('info-vol').textContent = `${vol}cm\u00B3`;
+        d.getElementById('info-weight').textContent = `${(vol * 1.24).toFixed(0)}g`;
+        const fits = size.x <= 256 && size.y <= 256 && size.z <= 256;
+        d.getElementById('info-print').textContent = fits ? 'Fits' : 'TOO BIG';
+        d.getElementById('info-print').className = 'info-value ' + (fits ? 'good' : 'bad');
         d.getElementById('loading').style.display = 'none';
     }, undefined, (err) => {
         document.getElementById('loading').textContent = 'Error: ' + err.message;
     });
 }
 
-// ── Populate dropdown from /cad/renders ──
+// ── Populate dropdown ──
 async function refreshModels() {
     const sel = document.getElementById('stl-select');
     try {
-        const res = await fetch('/cad/renders');
-        const data = await res.json();
+        const data = await (await fetch('/cad/renders')).json();
         const stls = data.filter(f => f.name.endsWith('.stl'));
         sel.innerHTML = '';
-        if (stls.length === 0) {
-            sel.innerHTML = '<option value="">No models yet — click Generate</option>';
-            return;
-        }
-        stls.forEach((f, i) => {
-            const opt = document.createElement('option');
-            opt.value = `/renders/${f.name}`;
-            opt.textContent = `${f.name} (${f.size_kb}KB)`;
-            sel.appendChild(opt);
+        if (!stls.length) { sel.innerHTML = '<option value="">No models</option>'; return; }
+        stls.forEach(f => {
+            const o = document.createElement('option');
+            o.value = `/renders/${f.name}`;
+            o.textContent = `${f.name.replace(/_\d+\.stl/, '')} (${f.size_kb}KB)`;
+            sel.appendChild(o);
         });
-        // Auto-load first
         loadSTL(sel.value, stls[0].name);
     } catch {
-        // Fallback: try the legacy stabilizer
-        sel.innerHTML = '<option value="/renders/stabilizer_v1.stl">stabilizer_v1.stl</option>';
-        loadSTL('/renders/stabilizer_v1.stl', 'stabilizer_v1');
+        sel.innerHTML = '<option value="/renders/stabilizer_v1.stl">stabilizer_v1</option>';
+        loadSTL('/renders/stabilizer_v1.stl', 'stabilizer');
     }
 }
 
 // ── Events ──
-document.getElementById('stl-select').addEventListener('change', (e) => {
+document.getElementById('stl-select').addEventListener('change', e => {
     if (e.target.value) loadSTL(e.target.value, e.target.value);
 });
 
-document.getElementById('design-input').addEventListener('keydown', (e) => {
+document.getElementById('design-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('btn-generate').click();
 });
 
 document.getElementById('btn-generate').addEventListener('click', async () => {
     const input = document.getElementById('design-input');
     const desc = input.value.trim();
-    if (!desc) { input.focus(); input.placeholder = 'Type something — car, vase, bracket...'; return; }
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('loading').textContent = `Generating "${desc}"... (LLM designing CAD)`;
+    if (!desc) { input.focus(); return; }
+    const ld = document.getElementById('loading');
+    ld.style.display = 'block';
+    ld.textContent = `Designing "${desc}"...`;
     input.disabled = true;
     try {
         const res = await fetch(`/design?description=${encodeURIComponent(desc)}`, { method: 'POST' });
@@ -262,29 +329,56 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
             if (sel.value) loadSTL(sel.value, data.stl_filename || data.stl_file);
             input.value = '';
         } else {
-            alert('Generation failed: ' + (data.error || JSON.stringify(data).slice(0, 300)));
-            document.getElementById('loading').style.display = 'none';
+            alert('Failed: ' + (data.error || JSON.stringify(data).slice(0, 200)));
+            ld.style.display = 'none';
         }
     } catch (err) {
         alert('Error: ' + err.message);
-        document.getElementById('loading').style.display = 'none';
+        ld.style.display = 'none';
     } finally {
         input.disabled = false;
         input.focus();
     }
 });
 
-document.getElementById('btn-download').addEventListener('click', () => {
-    const sel = document.getElementById('stl-select');
-    if (sel.value) {
-        const a = document.createElement('a');
-        a.href = sel.value;
-        a.download = sel.value.split('/').pop();
-        a.click();
+// ── Render Photo (Flux.1) ──
+document.getElementById('btn-render').addEventListener('click', async () => {
+    const name = currentProductName.replace(/_\d+\.stl/, '').replace(/_/g, ' ') || 'product';
+    const overlay = document.getElementById('render-overlay');
+    const status = document.getElementById('render-status');
+    const img = document.getElementById('render-image');
+    overlay.classList.add('visible');
+    img.style.display = 'none';
+    status.textContent = `Generating photorealistic render of "${name}" with Flux.1... (~2 min)`;
+    status.style.display = 'block';
+    try {
+        const matBtn = document.querySelector('.mat-btn.active');
+        const matName = matBtn ? matBtn.textContent.trim() : 'white PLA plastic';
+        const res = await fetch(`/visualize?product_name=${encodeURIComponent(name)}&description=3D+printed+${encodeURIComponent(name)}&material=${encodeURIComponent(matName)}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.image_base64) {
+            img.src = `data:image/png;base64,${data.image_base64}`;
+            img.style.display = 'block';
+            status.style.display = 'none';
+        } else if (data.image_path) {
+            const fname = data.image_path.split('/').pop();
+            img.src = `/renders/${fname}`;
+            img.style.display = 'block';
+            status.style.display = 'none';
+        } else {
+            status.textContent = 'Render returned no image. Model may still be loading on first run.';
+        }
+    } catch (err) {
+        status.textContent = 'Render error: ' + err.message;
     }
 });
 
-// Material buttons
+document.getElementById('btn-download').addEventListener('click', () => {
+    const sel = document.getElementById('stl-select');
+    if (sel.value) { const a = document.createElement('a'); a.href = sel.value; a.download = sel.value.split('/').pop(); a.click(); }
+});
+
+// ── Material buttons ──
 document.querySelectorAll('.mat-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
@@ -292,25 +386,18 @@ document.querySelectorAll('.mat-btn').forEach(btn => {
         material.color.setHex(parseInt(btn.dataset.color));
         material.roughness = parseFloat(btn.dataset.rough);
         material.metalness = parseFloat(btn.dataset.metal);
+        material.clearcoat = parseFloat(btn.dataset.clear);
     });
 });
 
-// URL param support: ?stl=filename.stl
-const urlParams = new URLSearchParams(window.location.search);
-const stlParam = urlParams.get('stl');
-
-// Double-click reset
+// ── Camera reset ──
 renderer.domElement.addEventListener('dblclick', () => {
     if (currentMesh) {
         const box = new THREE.Box3().setFromObject(currentMesh);
-        const size = new THREE.Vector3();
-        box.getSize(size);
+        const size = new THREE.Vector3(); box.getSize(size);
         const m = Math.max(size.x, size.y, size.z);
-        camera.position.set(m * 1.4, m * 0.9, m * 1.4);
+        camera.position.set(m * 1.3, m * 0.8, m * 1.3);
         controls.target.set(0, size.y / 3, 0);
-    } else {
-        camera.position.set(200, 150, 250);
-        controls.target.set(0, 20, 0);
     }
     controls.update();
 });
@@ -321,17 +408,13 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-}
+// URL param support
+const stlParam = new URLSearchParams(window.location.search).get('stl');
+
+function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
 animate();
 
-// Init
-refreshModels().then(() => {
-    if (stlParam) loadSTL(`/renders/${stlParam}`, stlParam);
-});
+refreshModels().then(() => { if (stlParam) loadSTL(`/renders/${stlParam}`, stlParam); });
 </script>
 </body>
 </html>
