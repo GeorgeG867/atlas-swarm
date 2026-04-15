@@ -334,38 +334,48 @@ Do NOT include explanation — just the JSON object.
         return cad_engine.generate_from_library(product_type, params)
 
     async def _design_from_llm_code(self, opportunity: dict) -> dict:
-        """Generate CadQuery code via LLM with retry on failure."""
-        from . import cad_engine
+        """Generate CadQuery code via LLM with category-matched examples."""
+        from . import cad_engine, cad_examples
         import re
 
         name = opportunity.get("title", "custom")[:40]
         description = opportunity.get("description", name)
 
-        system_prompt = (
-            "You are a CadQuery code generator. Output ONLY valid Python code. "
-            "No explanation. No thinking. No markdown. Just code that runs."
-        )
+        # Match to best example category
+        category = cad_examples.match_category(description)
+        example = cad_examples.get_example(category)
+        log.info("[CTO] Category '%s' for: %s", category, description)
 
-        base_prompt = f"""Write CadQuery code for: {description}
+        base_prompt = f"""Adapt this CadQuery EXAMPLE to make: {description}
 
+EXAMPLE ({category}):
+```
 import cadquery as cq
 import math
+{example}
+```
 
-# Build the model using .box(), .cylinder(), .union(), .cut(), .translate(), .rotate()
-# All dimensions in mm. Max 256x256x256mm. Min wall 1.5mm.
-# Assign final solid to `result`.
-# Keep under 40 lines. Use try/except around .fillet() calls.
+YOUR TASK: Modify the example above to create "{description}" instead.
+Keep the same coding style.  Change dimensions, features, and shape to match.
+The variable `result` must hold the final solid.
+Output ONLY the modified Python code.
 """
         last_error = None
         for attempt in range(2):
             if attempt == 0:
                 prompt = base_prompt
             else:
-                prompt = f"""Fix this CadQuery code.  Error: {last_error}
+                prompt = f"""The previous code failed: {last_error}
 
-{description}
+Fix it.  Here is a WORKING example for reference:
+```
+import cadquery as cq
+{example}
+```
 
-Write corrected code.  Simpler geometry.  Must compile.  Assign to `result`.
+Adapt it for: {description}
+Simpler geometry.  Must compile.  Assign to `result`.
+Output ONLY Python code.
 """
             raw = await self.llm(prompt, task_type="json_task", max_tokens=4000)
             code = self._extract_python(raw)

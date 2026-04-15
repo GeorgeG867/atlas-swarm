@@ -62,8 +62,14 @@ def validate_geometry(solid: cq.Workplane) -> dict:
             if val < 0.5:
                 issues.append(f"{axis}={val}mm too small — likely degenerate")
 
-        # Volume
-        volume_mm3 = shape.Volume()
+        # Volume — different CadQuery versions expose this differently
+        try:
+            volume_mm3 = shape.Volume()
+        except AttributeError:
+            try:
+                volume_mm3 = float(shape.wrapped.Volume())
+            except Exception:
+                volume_mm3 = dims["x"] * dims["y"] * dims["z"] * 0.3  # rough estimate
         if volume_mm3 < 10:
             issues.append(f"Volume {volume_mm3:.1f}mm³ is suspiciously small")
 
@@ -288,11 +294,12 @@ def generate_from_code(cadquery_code: str, product_name: str = "custom") -> dict
 # ═══════════════════════════════════════════════════════════════════════
 
 def match_product_type(text: str) -> Optional[str]:
-    """Fuzzy-match free text to a library product type via keywords."""
-    text_lower = text.lower()
+    """Match free text to a library product type via whole-word keyword matching."""
+    import re
+    words = set(re.findall(r'\b\w+\b', text.lower()))
     best, best_score = None, 0
     for key, entry in cad_library.PRODUCTS.items():
-        score = sum(1 for kw in entry["keywords"] if kw in text_lower)
+        score = sum(1 for kw in entry["keywords"] if kw in words)
         if score > best_score:
             best, best_score = key, score
     return best if best_score > 0 else None
