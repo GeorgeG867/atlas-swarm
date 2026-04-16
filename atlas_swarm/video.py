@@ -20,6 +20,7 @@ import gc
 import logging
 import os
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,8 @@ SVD_HEIGHT = 320
 
 # Lazy-loaded pipeline singleton
 _pipe = None
+# Only one SVD inference at a time — MPS contention causes 9x slowdown
+_inference_lock = threading.Lock()
 
 
 def _get_pipeline():
@@ -166,7 +169,29 @@ def _generate_video(
     fps: int = 8,
     motion_bucket_id: int = 127,
 ) -> dict:
-    """Run SVD-XT inference. Returns result dict with video_path or error."""
+    """Run SVD-XT inference. Returns result dict with video_path or error.
+
+    Uses a threading lock to prevent concurrent MPS access, which causes
+    severe slowdowns (9x) when two inferences compete for the same GPU.
+    """
+    if not _inference_lock.acquire(timeout=0):
+        return {
+            "success": False,
+            "error": "Another video generation is in progress. Try again in a few minutes.",
+        }
+    try:
+        return _generate_video_inner(image_path, num_frames, fps, motion_bucket_id)
+    finally:
+        _inference_lock.release()
+
+
+def _generate_video_inner(
+    image_path: Path,
+    num_frames: int = 14,
+    fps: int = 8,
+    motion_bucket_id: int = 127,
+) -> dict:
+    """Actual SVD-XT inference — called under _inference_lock."""
     import torch
 
     pipe = _get_pipeline()
@@ -193,6 +218,7 @@ def _generate_video(
             result = pipe(
                 image=image,
                 num_frames=num_frames,
+                num_inference_steps=20,
                 decode_chunk_size=2,
                 motion_bucket_id=motion_bucket_id,
                 noise_aug_strength=0.02,
@@ -222,6 +248,7 @@ def _generate_video(
                     result = pipe(
                         image=smaller_img,
                         num_frames=14,
+                        num_inference_steps=15,
                         decode_chunk_size=1,
                         motion_bucket_id=motion_bucket_id,
                         noise_aug_strength=0.02,
