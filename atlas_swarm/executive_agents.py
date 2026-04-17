@@ -334,22 +334,53 @@ Do NOT include explanation — just the JSON object.
         return cad_engine.generate_from_library(product_type, params)
 
     async def _design_from_llm_code(self, opportunity: dict) -> dict:
-        """Generate CadQuery code via LLM with category-matched examples."""
-        from . import cad_engine, cad_examples
+        """Generate CadQuery code via LLM with category-matched examples.
+
+        Enriches the prompt with the patent mechanism + competitive intel so
+        the model designs for a real, recognizable consumer product instead
+        of defaulting to a featureless box.
+        """
+        from . import cad_engine, cad_examples, competitive_intel as ci
         import re
 
         name = opportunity.get("title", "custom")[:40]
         description = opportunity.get("description", name)
 
-        # Match to best example category
+        # Patent mechanism — the CORE of the design.  Prefer explicit
+        # patent_mechanism; fall back to any claim/abstract the opportunity
+        # payload already carries.  Truncate to keep the prompt bounded.
+        mechanism = (
+            opportunity.get("patent_mechanism")
+            or opportunity.get("unique_angle")
+            or opportunity.get("patent_claims")
+            or opportunity.get("abstract")
+            or "(no mechanism provided — infer from title and description)"
+        )
+        mechanism = str(mechanism)[:600]
+
+        # Competitive intel — either pre-attached to the opportunity by the
+        # orchestrator (preferred — single AIM call per pipeline) or generated
+        # here on demand so direct /design calls still get the benefit.
+        intel = opportunity.get("competitive_intel")
+        if not intel:
+            try:
+                intel = await ci.competitive_analysis(opportunity)
+            except Exception as exc:
+                log.warning("[CTO] competitive analysis failed: %s", exc)
+                intel = {}
+        intel_summary = ci.summarize_for_prompt(intel, max_chars=900)
+
         category = cad_examples.match_category(description)
         example = cad_examples.get_example(category)
-        log.info("[CTO] Category '%s' for: %s", category, description)
+        log.info("[CTO] Category '%s' mechanism=%.60s for: %s",
+                 category, mechanism, description)
 
         from . import config
         printer = config.printer_constraints()
         fmt_kwargs = dict(
             description=description,
+            mechanism=mechanism,
+            competitive_intel=intel_summary,
             category=category,
             example=example,
             max_x=printer.get("max_x_mm", 256),

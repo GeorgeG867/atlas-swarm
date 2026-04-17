@@ -107,8 +107,16 @@ class SwarmOrchestrator:
                       {"task_type": task_type, "agent": agent_id})
         return {"agent": agent_id, "task_type": task_type, "success": success, "result": result.get("result")}
 
-    async def run_full_pipeline(self, vertical: str = "anatomical model surgical training") -> dict:
-        """End-to-end: scan -> score -> brief -> CAD -> spec -> content -> listing."""
+    async def run_full_pipeline(self, vertical: str = "desk organization") -> dict:
+        """End-to-end: scan -> ceo -> competitive-intel -> CAD -> spec -> content -> listing.
+
+        Default vertical flipped from "surgical training" to "desk organization"
+        so the pipeline starts from a consumer-product hypothesis.  The
+        printability gate (in KIE/IdeaFrog) filters upstream results and
+        falls back to the curated first-product catalog when nothing passes.
+        """
+        from . import competitive_intel as ci
+
         log.info(f"[PIPELINE] Starting for: {vertical}")
         steps = {}
         scan = await self.dispatch({"type": "innovation_scan", "verticals": [vertical]})
@@ -119,10 +127,34 @@ class SwarmOrchestrator:
         top = top_10[0]
         steps["2_ceo"] = await self.dispatch({"type": "review_opportunities", "opportunities": top_10[:5]})
 
-        # Step 3: CTO designs the product — now generates real STL
+        # Step 2b: Competitive analysis — ONE AIM call per pipeline, reused by CTO.
+        cto_opportunity = {
+            "title": top.get("title", ""),
+            "description": top.get("description") or top.get("title", ""),
+            "domain": top.get("domain", ""),
+            "vertical": vertical,
+            "patent_mechanism": top.get("patent_mechanism") or top.get("unique_angle") or "",
+            "patent_claims": top.get("patent_claims") or "",
+            "market": top.get("market") or top.get("target_market") or "",
+        }
+        try:
+            intel = await ci.competitive_analysis(cto_opportunity)
+            cto_opportunity["competitive_intel"] = intel
+            steps["2b_competitive_intel"] = {
+                "success": True,
+                "competitors": len(intel.get("competitors", [])),
+                "must_haves": intel.get("must_haves", []),
+                "target_dimensions_mm": intel.get("target_dimensions_mm"),
+                "fallback": intel.get("_fallback", False),
+            }
+        except Exception as exc:
+            log.warning("[PIPELINE] competitive_intel step failed: %s", exc)
+            steps["2b_competitive_intel"] = {"success": False, "error": str(exc)}
+
+        # Step 3: CTO designs the product — mechanism + intel inform the CAD prompt.
         design = await self.dispatch({
             "type": "design_product",
-            "opportunity": {"title": top.get("title", ""), "domain": top.get("domain", ""), "vertical": vertical},
+            "opportunity": cto_opportunity,
         })
         steps["3_design"] = design
 

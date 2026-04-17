@@ -13,40 +13,69 @@ printer:
 prompts:
   cad_design:
     user: |
-      Adapt this CadQuery EXAMPLE to make: {description}
+      You are an experienced product designer writing a CadQuery script for a
+      single-piece 3D-printed consumer product.  Produce real, saleable
+      geometry — NOT a featureless box.
 
-      EXAMPLE ({category}):
+      PRODUCT TO DESIGN: {description}
+
+      PATENT MECHANISM (what the product physically must do):
+      {mechanism}
+
+      COMPETITIVE CONTEXT (top Amazon/Etsy sellers — match or beat these):
+      {competitive_intel}
+
+      DESIGN PROCESS (think step-by-step BEFORE writing code):
+      1. Read the mechanism — what MOVES, HOLDS, ALIGNS, or GRIPS?
+      2. Map each mechanism function to a CadQuery primitive:
+         - holds a phone/tablet/item   -> slot, groove, lip, tongue
+         - aligns two parts            -> rail, dovetail, chamfer
+         - grips or mounts             -> cantilever clip, living hinge, snap-fit, C-clamp
+         - cushions or grips surface   -> ribbed pad, knurl, flare
+         - resists bending             -> fillet, rib, gusset
+         - provides clearance          -> pocket, relief, undercut
+      3. Ensure the shape resembles the competitive target — if top sellers
+         have an adjustable angle, YOUR design MUST have an adjustable angle.
+      4. Use the MUST-HAVE features as mandatory geometry, DIFFERENTIATORS
+         as distinguishing touches.
+
+      REFERENCE EXAMPLE ({category}):
       ```
       import cadquery as cq
       import math
       {example}
       ```
 
-      YOUR TASK: Modify the example above to create "{description}" instead.
-
       DIMENSION RULES:
-      - The FINAL object must fit in a {max_x}x{max_y}x{max_z}mm box (3D printer bed).
-      - This is a MINIATURE/TOY model, NOT real-world size.
-      - If the real object is large (furniture, vehicles, buildings), scale down.
-      - Keep ALL dimensions in the 5-{target_max}mm range.
+      - Final object must fit in a {max_x}x{max_y}x{max_z}mm box (printer bed).
+      - Treat this as a hand-held consumer product at real scale.
+      - All dimensions in the 10-{target_max}mm range.
       - Minimum wall thickness: {min_wall}mm.
+      - Add at least 3 functional features (slot, hole, fillet, rib, cutout,
+        or snap).  Pure extrusions of a rectangle are FORBIDDEN.
 
-      Keep the example's coding style.  Change dimensions, features, and shape.
-      The variable `result` must hold the final solid.
-      Output ONLY the modified Python code.
+      OUTPUT RULES:
+      - Adapt the example above — do not start from scratch.
+      - The final solid MUST be assigned to a variable named `result`.
+      - Return ONLY the Python code (no prose, no markdown fences).
 
     retry: |
-      The previous code failed: {last_error}
+      Your previous code failed: {last_error}
 
-      Fix it.  Here is a WORKING example for reference:
+      Fix the error AND keep the mechanism-driven features.  Simpler geometry
+      is acceptable, but the product must still have the functional features
+      listed in the brief.  Do NOT degrade to a featureless box.
+
+      Working example for reference:
       ```
       import cadquery as cq
       {example}
       ```
 
-      Adapt it for: {description}
-      Simpler geometry.  Must compile.  Assign to `result`.
-      All dimensions in the 5-{target_max}mm range.
+      Task: {description}
+      Mechanism: {mechanism}
+      Must compile.  Assign the final solid to `result`.
+      Dimensions in 10-{target_max}mm range.
       Output ONLY Python code.
 
   product_photo:

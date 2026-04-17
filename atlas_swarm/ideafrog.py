@@ -12,6 +12,9 @@ from typing import Optional
 
 import httpx
 
+from .first_product_catalog import get_fallback_list, get_fallback_opportunity
+from .printability import filter_printable, printability_score
+
 log = logging.getLogger(__name__)
 
 IDEAFROG_URL = os.environ.get("IDEAFROG_URL", "http://192.168.1.204:5001")
@@ -29,17 +32,33 @@ async def health() -> dict:
         return {"status": "unreachable", "error": str(exc)}
 
 
-async def fetch_opportunities(limit: int = 50, min_score: float = 0.0) -> list[dict]:
-    """Return opportunities sorted by swarm_score desc.  Filters by min_score."""
+async def fetch_opportunities(
+    limit: int = 50,
+    min_score: float = 0.0,
+    printable_only: bool = True,
+    min_printability: float = 1.0,
+) -> list[dict]:
+    """Return opportunities sorted by swarm_score desc.  Filters by min_score.
+
+    When ``printable_only`` is True (the default for first-product work), the
+    printability gate rejects industrial/medical/robotic entries and sorts the
+    survivors by printability score so simpler consumer items float to the top.
+    """
     try:
+        fetch_limit = max(limit * 4, 100) if printable_only else limit
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(f"{IDEAFROG_URL}/opportunities", params={"limit": limit})
+            r = await client.get(f"{IDEAFROG_URL}/opportunities", params={"limit": fetch_limit})
             r.raise_for_status()
             data = r.json()
             opps = data.get("opportunities", data if isinstance(data, list) else [])
             opps = [o for o in opps if o.get("swarm_score", 0) >= min_score]
-            opps.sort(key=lambda o: o.get("swarm_score", 0), reverse=True)
-            return opps
+            if printable_only:
+                before = len(opps)
+                opps = filter_printable(opps, min_score=min_printability)
+                log.info("[IDEAFROG] printability gate: %d -> %d opps", before, len(opps))
+            else:
+                opps.sort(key=lambda o: o.get("swarm_score", 0), reverse=True)
+            return opps[:limit]
     except Exception as exc:
         log.warning("[IDEAFROG] fetch_opportunities failed: %s", exc)
         return []
@@ -80,6 +99,11 @@ def opportunity_to_prompt(opp: dict) -> dict:
         "revenue_model": opp.get("revenue_model"),
         "swarm_score": opp.get("swarm_score"),
         "triz_principle": opp.get("triz_principle"),
+        "patent_mechanism": mechanism,
+        "patent_claims": opp.get("patent_claims") or opp.get("claims") or "",
+        "abstract": opp.get("abstract") or opp.get("patent_abstract") or "",
+        "printability_score": opp.get("_printability_score"),
+        "printability_reasons": opp.get("_printability_reasons", []),
         "stem": stem,
         "source": "ideafrog",
     }
@@ -92,19 +116,58 @@ def _existing_glb_for(stem: str) -> Optional[Path]:
     return max(matches, key=lambda p: p.stat().st_mtime)
 
 
-async def next_unrendered(min_score: float = 50.0) -> Optional[dict]:
-    """Return the highest-scoring opportunity that does NOT yet have a GLB."""
-    opps = await fetch_opportunities(limit=100, min_score=min_score)
+async def next_unrendered(
+    min_score: float = 50.0,
+    printable_only: bool = True,
+    min_printability: float = 1.5,
+    allow_fallback: bool = True,
+) -> Optional[dict]:
+    """Return the highest-scoring printable opportunity without an existing GLB.
+
+    Printability gate ON by default — never returns robotic grippers, surgical
+    devices, or industrial machinery for the autonomous pipeline.
+
+    When IdeaFrog returns nothing that passes the gate and ``allow_fallback``
+    is True, draws from the curated first-product catalog so the pipeline
+    always has a sensible consumer item to design.  Catalog entries whose
+    stem already has a GLB on disk are skipped.
+    """
+    opps = await fetch_opportunities(
+        limit=100,
+        min_score=min_score,
+        printable_only=printable_only,
+        min_printability=min_printability,
+    )
     for opp in opps:
         payload = opportunity_to_prompt(opp)
         if _existing_glb_for(payload["stem"]) is None:
             return payload
-    # Every opp already rendered — return the top one anyway so callers get something
+
+    if allow_fallback:
+        log.info("[IDEAFROG] upstream empty after gate — using first-product catalog")
+        for item in get_fallback_list():
+            payload = opportunity_to_prompt(item)
+            if _existing_glb_for(payload["stem"]) is None:
+                return payload
+        # Every catalog item already rendered — return the top one anyway.
+        top = get_fallback_opportunity()
+        if top is not None:
+            return opportunity_to_prompt(top)
+
     if opps:
         return opportunity_to_prompt(opps[0])
     return None
 
 
-async def top_opportunities(n: int = 10) -> list[dict]:
-    opps = await fetch_opportunities(limit=n)
-    return [opportunity_to_prompt(o) for o in opps]
+async def top_opportunities(
+    n: int = 10,
+    printable_only: bool = True,
+    allow_fallback: bool = True,
+) -> list[dict]:
+    opps = await fetch_opportunities(limit=n, printable_only=printable_only)
+    payloads = [opportunity_to_prompt(o) for o in opps]
+    if allow_fallback and len(payloads) < n:
+        deficit = n - len(payloads)
+        for item in get_fallback_list()[:deficit]:
+            payloads.append(opportunity_to_prompt(item))
+    return payloads[:n]
